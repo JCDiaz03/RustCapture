@@ -14,3 +14,4 @@ edition = "2024"
 [workspace.dependencies]
 rustcapture-core = { path = "crates/core" }
 platform-win = { path = "crates/platform-win" }
+thiserror = "2"
