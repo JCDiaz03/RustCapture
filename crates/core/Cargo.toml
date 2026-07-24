@@ -10,3 +10,4 @@ jpeg-encoder = { workspace = true }
 time = { workspace = true }
 serde = { workspace = true }
 toml = { workspace = true }
+fontdue = { workspace = true }
