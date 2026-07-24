@@ -9,6 +9,7 @@ use std::sync::mpsc;
 use platform_win::clipboard::ClipboardSink;
 use platform_win::gdi::GdiScreenSource;
 use rustcapture_core::capture::create_mode;
+use rustcapture_core::config::Config;
 use rustcapture_core::orchestrator::{AppEvent, CaptureRequest, Orchestrator};
 use rustcapture_core::output::FileSink;
 
@@ -23,6 +24,15 @@ fn main() -> ExitCode {
         }
     };
 
+    let (config_path, _storage) = rustcapture_core::config::default_location();
+    let config = match Config::load(&config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::from(2);
+        }
+    };
+
     let mut orch = Orchestrator::new(Box::new(GdiScreenSource::new()), Box::new(create_mode));
     let destination = match options.destination {
         args::Destination::Clipboard => {
@@ -31,8 +41,12 @@ fn main() -> ExitCode {
             "clipboard"
         }
         args::Destination::File { dir, format } => {
-            orch.add_sink(Box::new(FileSink::new(dir, format)))
-                .expect("primer sink registrado");
+            let dir = dir.unwrap_or_else(|| config.output.dir.clone());
+            let format = format.unwrap_or(config.output.format);
+            orch.add_sink(Box::new(
+                FileSink::new(dir, format).with_prefix(config.output.prefix.clone()),
+            ))
+            .expect("primer sink registrado");
             "file"
         }
     };

@@ -4,10 +4,12 @@
 use crate::ports::Frame;
 
 /// Formatos de salida de imagen fija soportados por el MVP.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "lowercase")]
 pub enum ImageFormat {
     Png,
     /// Calidad fija 90 hasta que la config (D9) la parametrice.
+    #[serde(alias = "jpg")]
     Jpeg,
 }
 

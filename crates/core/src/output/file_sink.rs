@@ -13,13 +13,20 @@ pub struct FileSink {
 }
 
 impl FileSink {
-    /// Prefijo fijo "captura" hasta que la config (D9) lo parametrice.
+    /// Prefijo por defecto "captura"; la config (D9) lo cambia con
+    /// [`FileSink::with_prefix`].
     pub fn new(dir: impl Into<PathBuf>, format: ImageFormat) -> Self {
         Self {
             dir: dir.into(),
             format,
             prefix: "captura".to_string(),
         }
+    }
+
+    /// Sustituye el prefijo por el de la config (D9).
+    pub fn with_prefix(mut self, prefix: impl Into<String>) -> Self {
+        self.prefix = prefix.into();
+        self
     }
 }
 
@@ -83,6 +90,21 @@ mod tests {
             &bytes[..8],
             &[0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n']
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn with_prefix_cambia_el_nombre_generado() {
+        let dir = dir_temporal("prefijo");
+        let mut sink = FileSink::new(&dir, ImageFormat::Png).with_prefix("shot");
+        sink.deliver(&Frame::filled(1, 1, [0; 4])).unwrap();
+        let nombre = std::fs::read_dir(&dir)
+            .unwrap()
+            .next()
+            .unwrap()
+            .unwrap()
+            .file_name();
+        assert!(nombre.to_string_lossy().starts_with("shot_"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

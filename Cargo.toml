@@ -19,3 +19,5 @@ png = "0.18"
 jpeg-encoder = "0.7"
 time = { version = "0.3", features = ["local-offset"] }
 pico-args = "0.5"
+serde = { version = "1", features = ["derive"] }
+toml = "1"

@@ -32,7 +32,7 @@ Objetivo: capturar y sacar por portapapeles/archivo desde barra, hotkey y CLI. P
 - ✅ Salidas: portapapeles y archivo con nombres automáticos (f.40, f.41); PNG y JPEG.
 - ⏳ Barra flotante mínima + icono en bandeja + hotkeys globales (f.1-f.3).
 - ✅ CLI fina sobre el core (f.8, D1).
-- ⏳ Config TOML portable-first (f.4, D9).
+- ✅ Config TOML portable-first (f.4, D9).
 
 ## 3. F2 — Resto de modos de captura
 

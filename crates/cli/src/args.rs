@@ -35,7 +35,11 @@ pub struct CliOptions {
 #[derive(Debug, PartialEq)]
 pub enum Destination {
     Clipboard,
-    File { dir: PathBuf, format: ImageFormat },
+    /// `None` = "decide la config" (resolución flag > config > default).
+    File {
+        dir: Option<PathBuf>,
+        format: Option<ImageFormat>,
+    },
 }
 
 pub fn parse(raw: Vec<OsString>) -> Result<CliOptions, String> {
@@ -70,14 +74,12 @@ pub fn parse(raw: Vec<OsString>) -> Result<CliOptions, String> {
         (_, false) => Destination::Clipboard,
         (false, true) => {
             let format = match format_raw.as_deref() {
-                None | Some("png") => ImageFormat::Png,
-                Some("jpg") | Some("jpeg") => ImageFormat::Jpeg,
+                None => None,
+                Some("png") => Some(ImageFormat::Png),
+                Some("jpg") | Some("jpeg") => Some(ImageFormat::Jpeg),
                 Some(otro) => return Err(format!("formato desconocido: {otro} (png|jpg)")),
             };
-            Destination::File {
-                dir: dir.unwrap_or_else(|| PathBuf::from(".")),
-                format,
-            }
+            Destination::File { dir, format }
         }
     };
 
@@ -140,20 +142,20 @@ mod tests {
         assert_eq!(
             opts.destination,
             Destination::File {
-                dir: PathBuf::from("C:/caps"),
-                format: ImageFormat::Jpeg
+                dir: Some(PathBuf::from("C:/caps")),
+                format: Some(ImageFormat::Jpeg)
             }
         );
     }
 
     #[test]
-    fn file_sin_dir_usa_el_directorio_actual_y_png() {
+    fn file_sin_dir_deja_la_decision_a_la_config() {
         let opts = p(&["--file"]).unwrap();
         assert_eq!(
             opts.destination,
             Destination::File {
-                dir: PathBuf::from("."),
-                format: ImageFormat::Png
+                dir: None,
+                format: None
             }
         );
     }
