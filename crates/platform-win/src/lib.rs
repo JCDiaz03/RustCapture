@@ -3,3 +3,7 @@
 //!
 //! Todo el código `unsafe` y el interop `windows-rs` del proyecto vive
 //! encapsulado en este crate.
+
+pub mod dpi;
+pub mod gdi;
+pub mod pixels;
