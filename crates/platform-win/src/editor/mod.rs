@@ -86,6 +86,8 @@ struct EditorState {
     frame: Frame,
     dib: Dib,
     cerrado: bool,
+    /// Hay ediciones (Draw con OK) sin guardar ni copiar.
+    dirty: bool,
 }
 
 fn wide(s: &str) -> Vec<u16> {
@@ -120,6 +122,7 @@ fn run(frame: Frame) -> windows::core::Result<()> {
         frame,
         dib,
         cerrado: false,
+        dirty: false,
     }));
 
     // SAFETY: patrón del overlay: el estado lo posee esta función; la
@@ -172,7 +175,7 @@ fn crear_toolbar(hwnd: HWND) {
     let botones: [(u16, PCWSTR, bool, i32, i32); 4] = [
         (ID_GUARDAR, w!("Guardar como…"), true, 10, 120),
         (ID_COPIAR, w!("Copiar"), true, 140, 90),
-        (ID_DRAW, w!("Draw"), false, 240, 90),
+        (ID_DRAW, w!("Draw"), true, 240, 90),
         (ID_CERRAR, w!("Cerrar"), true, 340, 90),
     ];
     for (id, texto, habilitado, x, ancho) in botones {
@@ -200,7 +203,8 @@ fn crear_toolbar(hwnd: HWND) {
 }
 
 /// Diálogo "Guardar como" → codifica y escribe. Errores → MessageBox.
-fn guardar_como(hwnd: HWND, frame: &Frame) {
+/// Devuelve true si el archivo quedó escrito (limpia el flag de sucio).
+fn guardar_como(hwnd: HWND, frame: &Frame) -> bool {
     let mut buffer = [0u16; 260];
     let inicial: Vec<u16> = "captura".encode_utf16().collect();
     buffer[..inicial.len()].copy_from_slice(&inicial);
@@ -220,7 +224,7 @@ fn guardar_como(hwnd: HWND, frame: &Frame) {
     // SAFETY: struct completo con punteros a buffers locales vivos.
     let aceptado = unsafe { GetSaveFileNameW(&mut ofn) }.as_bool();
     if !aceptado {
-        return; // canceló
+        return false; // canceló
     }
     let fin = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
     let mut ruta = String::from_utf16_lossy(&buffer[..fin]);
@@ -241,30 +245,56 @@ fn guardar_como(hwnd: HWND, frame: &Frame) {
         .map_err(|e| e.to_string())
         .and_then(|bytes| std::fs::write(&ruta, bytes).map_err(|e| e.to_string()));
     match resultado {
-        Ok(()) => crate::alerts::capture_beep(),
-        Err(e) => crate::alerts::error_box("RustCapture Editor", &format!("{ruta}: {e}")),
+        Ok(()) => {
+            crate::alerts::capture_beep();
+            true
+        }
+        Err(e) => {
+            crate::alerts::error_box("RustCapture Editor", &format!("{ruta}: {e}"));
+            false
+        }
     }
 }
 
 fn on_command(hwnd: HWND, id: u16) {
     match id {
         ID_GUARDAR => {
-            if let Some(state) = state_mut(hwnd) {
-                guardar_como(hwnd, &state.frame);
+            if let Some(state) = state_mut(hwnd)
+                && guardar_como(hwnd, &state.frame)
+            {
+                state.dirty = false;
             }
         }
         ID_COPIAR => {
             if let Some(state) = state_mut(hwnd) {
                 match crate::clipboard::ClipboardSink::new().deliver(&state.frame) {
-                    Ok(()) => crate::alerts::capture_beep(),
+                    Ok(()) => {
+                        state.dirty = false;
+                        crate::alerts::capture_beep();
+                    }
                     Err(_) => crate::alerts::error_beep(),
                 }
             }
         }
+        // Draw: ventana de dibujo modal; OK devuelve el frame horneado.
+        ID_DRAW => {
+            if let Some(state) = state_mut(hwnd)
+                && let Some(nuevo) = crate::draw::show_draw(state.frame.clone())
+                && let Ok(screen) = ScreenDc::get()
+                && let Ok(dc) = MemDc::compatible_with(&screen)
+                && let Ok(dib) = dib_from_frame(&dc, &nuevo)
+            {
+                state.frame = nuevo;
+                state.dib = dib;
+                state.dirty = true;
+                // SAFETY: invalidación de la propia ventana.
+                unsafe { _ = InvalidateRect(Some(hwnd), None, true) };
+            }
+        }
         ID_CERRAR => {
-            // Sin ediciones posibles todavía: cierre silencioso (spec).
-            // SAFETY: destruir la propia ventana desde su wndproc.
-            unsafe { _ = DestroyWindow(hwnd) };
+            // Una sola ruta de cierre: WM_CLOSE decide según `dirty`.
+            // SAFETY: post a la propia ventana.
+            unsafe { _ = PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0)) };
         }
         _ => {}
     }
@@ -299,6 +329,24 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     _ = pintar(hwnd, hdc, state);
                 }
                 _ = EndPaint(hwnd, &ps);
+                LRESULT(0)
+            }
+            WM_CLOSE => {
+                // Sucio → confirmar el descarte (regla del humano).
+                let descartar = match state_mut(hwnd) {
+                    Some(state) if state.dirty => {
+                        MessageBoxW(
+                            Some(hwnd),
+                            w!("Hay cambios sin guardar. ¿Descartarlos?"),
+                            w!("RustCapture Editor"),
+                            MB_YESNO | MB_ICONQUESTION,
+                        ) == IDYES
+                    }
+                    _ => true,
+                };
+                if descartar {
+                    _ = DestroyWindow(hwnd);
+                }
                 LRESULT(0)
             }
             WM_DESTROY => {

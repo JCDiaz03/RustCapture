@@ -46,7 +46,8 @@ Objetivo: capturar y sacar por portapapeles/archivo desde barra, hotkey y CLI. P
 ## 4. F3 — Editor y anotación (D5 + D6)
 
 - ✅ Slice A — Editor shell (f.21): captura → ventana de editor (Guardar como/Copiar/Draw/Cerrar), barra auto-oculta, destino "editor" por defecto.
-- 🔵 Modelo de documento: objetos `Annotation`, Strategy y `Canvas` sobre frame RGBA (D5) — motor hecho; falta la Factory desde la toolbar (Slice C).
+- ✅ Slice C — Ventana de dibujo (Ventana2): paleta sobre el motor de anotación, texto in situ, OK hornea y marca el editor como editado.
+- ✅ Modelo de documento: objetos `Annotation`, Strategy y `Canvas` sobre frame RGBA (D5); la paleta de la ventana de dibujo hace de Factory.
 - ✅ Command pattern con undo/redo (D6).
 - 🔵 Herramientas (motor en core): texto, flechas, líneas, formas, resaltado y lápiz hechos; pasos numerados, leyendas y pixelado pendientes; goma = eliminar objeto (llega con la UI del Slice C).
 - ⏳ Recorte, redimensionado, nitidez, marca de agua, efectos de borde (f.26, f.28-f.30).
