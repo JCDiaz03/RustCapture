@@ -9,12 +9,15 @@
 mod raii;
 
 use rustcapture_core::ports::{Frame, Rect, ScreenSource, ScreenSourceError};
-use windows::Win32::Foundation::RECT;
+use windows::Win32::Foundation::{POINT, RECT};
 use windows::Win32::Graphics::Dwm::{DWMWA_EXTENDED_FRAME_BOUNDS, DwmGetWindowAttribute};
-use windows::Win32::Graphics::Gdi::{BitBlt, CAPTUREBLT, GdiFlush, SRCCOPY};
+use windows::Win32::Graphics::Gdi::{
+    BitBlt, CAPTUREBLT, GdiFlush, GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO,
+    MonitorFromPoint, SRCCOPY,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, GetSystemMetrics, GetWindowRect, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
-    SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
+    GetCursorPos, GetForegroundWindow, GetSystemMetrics, GetWindowRect, SM_CXVIRTUALSCREEN,
+    SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
 };
 use windows::core::Result as WinResult;
 
@@ -42,6 +45,35 @@ impl GdiScreenSource {
             let w = GetSystemMetrics(SM_CXVIRTUALSCREEN).max(0) as u32;
             let h = GetSystemMetrics(SM_CYVIRTUALSCREEN).max(0) as u32;
             Rect::new(x, y, w, h)
+        }
+    }
+
+    /// Rect del monitor que contiene el cursor (f.9: "pantalla completa"
+    /// es la pantalla del usuario). Si algo falla, cae al escritorio.
+    pub fn active_monitor_rect(&self) -> Rect {
+        // SAFETY: consultas sin precondiciones; ante cualquier fallo se
+        // devuelve el escritorio virtual completo.
+        unsafe {
+            let mut pt = POINT::default();
+            if GetCursorPos(&mut pt).is_err() {
+                return GdiScreenSource::desktop_rect(self);
+            }
+            let monitor = MonitorFromPoint(pt, MONITOR_DEFAULTTONEAREST);
+            let mut info = MONITORINFO {
+                cbSize: size_of::<MONITORINFO>() as u32,
+                ..Default::default()
+            };
+            if GetMonitorInfoW(monitor, &mut info).as_bool() {
+                let r = info.rcMonitor;
+                Rect::new(
+                    r.left,
+                    r.top,
+                    r.right.saturating_sub(r.left).max(0) as u32,
+                    r.bottom.saturating_sub(r.top).max(0) as u32,
+                )
+            } else {
+                GdiScreenSource::desktop_rect(self)
+            }
         }
     }
 
@@ -114,6 +146,10 @@ impl ScreenSource for GdiScreenSource {
         GdiScreenSource::desktop_rect(self)
     }
 
+    fn active_monitor_rect(&self) -> Rect {
+        GdiScreenSource::active_monitor_rect(self)
+    }
+
     fn active_window_rect(&self) -> Option<Rect> {
         GdiScreenSource::active_window_rect(self)
     }
@@ -156,6 +192,17 @@ mod tests {
         assert_eq!((frame.width, frame.height), (8, 8));
         // Alfa forzado a opaco en la conversión BGRA→RGBA.
         assert!(frame.pixels.chunks_exact(4).all(|px| px[3] == 255));
+    }
+
+    /// Humo: el monitor activo cabe dentro del escritorio virtual.
+    #[test]
+    #[ignore = "requiere escritorio real"]
+    fn el_monitor_activo_esta_dentro_del_escritorio() {
+        crate::dpi::ensure_per_monitor_dpi_awareness();
+        let source = GdiScreenSource::new();
+        let monitor = source.active_monitor_rect();
+        assert!(!monitor.is_empty());
+        assert!(source.desktop_rect().contains(&monitor));
     }
 
     /// Humo: exige sesión gráfica real. Ejecutar con

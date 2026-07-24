@@ -4,7 +4,11 @@
 //! Todo el código `unsafe` y el interop `windows-rs` del proyecto vive
 //! encapsulado en este crate.
 
+pub mod alerts;
+pub mod bar;
 pub mod clipboard;
 pub mod dpi;
 pub mod gdi;
+pub mod hotkeys;
 pub mod pixels;
+pub mod tray;

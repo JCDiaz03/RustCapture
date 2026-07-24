@@ -18,9 +18,9 @@ Desarrollo: IA-first (Opus 4.8 / Fable 5).
 
 ### Sistema y filosofía
 
-1. Barra flotante como centro de la app: sin ventana principal, acoplable al borde de la pantalla, personalizable.
+1. Barra flotante como centro de la app: sin ventana principal, acoplable al borde de la pantalla, personalizable. Botones: pantalla completa, ventana activa, región libre (con lupa), captura con delay, grabador de pantalla y configuración.
 2. Icono en bandeja del sistema con menú rápido.
-3. Hotkeys globales configurables para todos los modos de captura.
+3. Hotkeys globales configurables para todos los modos de captura. Defaults estilo FastStone: `PrtScn` pantalla, `Alt+PrtScn` ventana, `Ctrl+PrtScn` región, `Ctrl+Shift+PrtScn` delay.
 4. Portable-first: un único `.exe` estático, configuración en `config.toml` junto al ejecutable (o `%APPDATA%` si se detecta instalación). Instalador opcional en el futuro.
 5. Consumo casi nulo en reposo; arranque instantáneo.
 6. Soporte multi-monitor con DPI mixtos (per-monitor DPI awareness).

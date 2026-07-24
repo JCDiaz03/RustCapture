@@ -13,6 +13,7 @@ pub struct MockScreenSource {
     origin: (i32, i32),
     base: Frame,
     active_window: Option<Rect>,
+    active_monitor: Option<Rect>,
     next_error: Option<ScreenSourceError>,
     requests: Vec<Rect>,
 }
@@ -24,6 +25,7 @@ impl MockScreenSource {
             origin,
             base,
             active_window: None,
+            active_monitor: None,
             next_error: None,
             requests: Vec::new(),
         }
@@ -31,6 +33,11 @@ impl MockScreenSource {
 
     pub fn set_active_window(&mut self, rect: Option<Rect>) {
         self.active_window = rect;
+    }
+
+    /// Monitor activo simulado; sin fijar, es el escritorio completo.
+    pub fn set_active_monitor(&mut self, rect: Option<Rect>) {
+        self.active_monitor = rect;
     }
 
     /// La siguiente llamada a `capture_region` devolverá este error.
@@ -52,6 +59,10 @@ impl ScreenSource for MockScreenSource {
             self.base.width,
             self.base.height,
         )
+    }
+
+    fn active_monitor_rect(&self) -> Rect {
+        self.active_monitor.unwrap_or_else(|| self.desktop_rect())
     }
 
     fn active_window_rect(&self) -> Option<Rect> {

@@ -15,7 +15,7 @@ USO:
   rustcapture [MODO] [DESTINO]
 
 MODOS (por defecto: --fullscreen):
-  --fullscreen            escritorio virtual completo
+  --fullscreen            monitor activo (el que contiene el cursor)
   --window                ventana activa
   --region X,Y,WxH        región en coordenadas de escritorio (p. ej. 0,0,800x600)
 

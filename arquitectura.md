@@ -95,6 +95,11 @@ El paquete del directorio `/crates/core` se llama `rustcapture-core`: un paquete
 **Hacemos:** el overlay de captura es una ventana fullscreen sin bordes que renderiza el frame congelado, y le montamos encima el motor de anotación de D5.
 **Para conseguir:** anotar-antes-de-capturar al estilo Flameshot (feature 20) sin escribir un segundo editor: seleccionar, anotar ahí mismo, Enter ejecuta el pipeline de salida. El editor completo queda para la edición con calma.
 
+## D11 — Barra, bandeja y hotkeys en Win32 puro
+
+**Hacemos:** la barra flotante (f.1), el icono de bandeja (f.2) y los hotkeys globales (f.3) se implementan con `windows-rs` directo (ventanas Win32 clásicas, `Shell_NotifyIcon`, `RegisterHotKey`) en `platform-win`; `gui` es un binario fino que cablea config + canal + hilo orquestador + bucle de mensajes. La UI del hilo principal solo produce eventos (D7); el orquestador vive en su propio hilo y se construye dentro de él, de modo que ningún trait object necesita `Send`. La barra es no-activate (no roba el foco) para que "capturar ventana activa" apunte a la ventana correcta.
+**Para conseguir:** peso y consumo mínimos — sin winit/egui/renderer para una barra de seis botones — y sin hipotecar la decisión de tecnología del editor (F3), que se tomará por separado.
+
 ## Dependencias entre decisiones
 
 D1-D3 son el esqueleto previo a todo; D4 y D7 habilitan la captura; D5+D6 forman el bloque del editor; D10 depende de D5 maduro; D8 es independiente del editor y es el módulo de mayor tamaño. Fases y estado → ver `roadmap.md`.

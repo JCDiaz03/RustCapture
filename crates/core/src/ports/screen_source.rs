@@ -18,6 +18,11 @@ pub trait ScreenSource {
     /// puede ser negativo).
     fn desktop_rect(&self) -> Rect;
 
+    /// Rect del monitor activo (el que contiene el cursor): "pantalla
+    /// completa" para el usuario es SU pantalla, no el escritorio
+    /// virtual entero (feedback de verificación manual, f.9).
+    fn active_monitor_rect(&self) -> Rect;
+
     /// Rect de la ventana activa, si hay alguna (f.10). Vive aquí y no en
     /// un puerto propio mientras sea la única consulta de ventanas (D2:
     /// puertos solo en fronteras reales); si crece, se extrae.

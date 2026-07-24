@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::output::ImageFormat;
+use crate::output::{DestinationKind, ImageFormat};
 
 /// Configuración única de la app (D9). Campos desconocidos en el TOML se
 /// ignoran: una config escrita por una versión más nueva no rompe esta.
@@ -11,6 +11,30 @@ use crate::output::ImageFormat;
 #[serde(default)]
 pub struct Config {
     pub output: OutputConfig,
+    pub hotkeys: HotkeysConfig,
+}
+
+/// Atajos globales (f.3) como strings "ctrl+alt+tecla"; se parsean con
+/// `Hotkey::parse` al arrancar. `region` y `delay` están reservados:
+/// el schema ya los conoce, se registran cuando llegue su fase (F4, F2).
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
+#[serde(default)]
+pub struct HotkeysConfig {
+    pub fullscreen: String,
+    pub window: String,
+    pub region: String,
+    pub delay: String,
+}
+
+impl Default for HotkeysConfig {
+    fn default() -> Self {
+        Self {
+            fullscreen: "printscreen".to_string(),
+            window: "alt+printscreen".to_string(),
+            region: "ctrl+printscreen".to_string(),
+            delay: "ctrl+shift+printscreen".to_string(),
+        }
+    }
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
@@ -21,6 +45,8 @@ pub struct OutputConfig {
     pub format: ImageFormat,
     /// Prefijo de los nombres automáticos (f.41).
     pub prefix: String,
+    /// Destino de las capturas de barra y hotkeys (f.1, f.3).
+    pub destination: DestinationKind,
 }
 
 impl Default for OutputConfig {
@@ -29,6 +55,7 @@ impl Default for OutputConfig {
             dir: PathBuf::from("."),
             format: ImageFormat::Png,
             prefix: "captura".to_string(),
+            destination: DestinationKind::Clipboard,
         }
     }
 }
@@ -170,6 +197,42 @@ mod tests {
         config.save(&path).unwrap();
         assert_eq!(Config::load(&path).unwrap(), config);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn los_hotkeys_por_defecto_son_estilo_faststone_y_parsean() {
+        use crate::ports::Hotkey;
+        let config = Config::default();
+        assert_eq!(config.hotkeys.fullscreen, "printscreen");
+        assert_eq!(config.hotkeys.window, "alt+printscreen");
+        assert_eq!(config.hotkeys.region, "ctrl+printscreen");
+        assert_eq!(config.hotkeys.delay, "ctrl+shift+printscreen");
+        for spec in [
+            &config.hotkeys.fullscreen,
+            &config.hotkeys.window,
+            &config.hotkeys.region,
+            &config.hotkeys.delay,
+        ] {
+            assert!(Hotkey::parse(spec).is_ok(), "default no parseable: {spec}");
+        }
+    }
+
+    #[test]
+    fn el_destino_por_defecto_es_clipboard_y_se_puede_cambiar() {
+        use crate::output::DestinationKind;
+        assert_eq!(
+            Config::default().output.destination,
+            DestinationKind::Clipboard
+        );
+        let config = Config::from_toml("[output]\ndestination = \"file\"\n").unwrap();
+        assert_eq!(config.output.destination, DestinationKind::File);
+    }
+
+    #[test]
+    fn hotkeys_parciales_completan_con_defaults() {
+        let config = Config::from_toml("[hotkeys]\nfullscreen = \"ctrl+f1\"\n").unwrap();
+        assert_eq!(config.hotkeys.fullscreen, "ctrl+f1");
+        assert_eq!(config.hotkeys.window, "alt+printscreen");
     }
 
     #[test]

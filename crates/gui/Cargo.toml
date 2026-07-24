@@ -3,6 +3,10 @@ name = "gui"
 version.workspace = true
 edition.workspace = true
 
+[[bin]]
+name = "rustcapture-gui"
+path = "src/main.rs"
+
 [dependencies]
 rustcapture-core.workspace = true
 platform-win.workspace = true

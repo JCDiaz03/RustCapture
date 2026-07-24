@@ -10,7 +10,7 @@
 
 ## 0. Estado general
 
-🔵 **Fase actual: F1 — MVP de captura.** F0 completada: especificación, arquitectura, skills y esqueleto del workspace listos.
+🔵 **Fase actual: F2 — Resto de modos de captura.** F1 completada: el MVP captura a diario desde barra, bandeja, hotkeys y CLI.
 
 ## 1. F0 — Diseño y preparación del entorno
 
@@ -30,7 +30,7 @@ Objetivo: capturar y sacar por portapapeles/archivo desde barra, hotkey y CLI. P
 - ✅ Bus de eventos mpsc + orquestador (D7).
 - ✅ Modos: pantalla completa, ventana activa, región rectangular (f.9, f.10, f.13) como strategies `CaptureMode` (D4).
 - ✅ Salidas: portapapeles y archivo con nombres automáticos (f.40, f.41); PNG y JPEG.
-- ⏳ Barra flotante mínima + icono en bandeja + hotkeys globales (f.1-f.3).
+- ✅ Barra flotante mínima + icono en bandeja + hotkeys globales (f.1-f.3).
 - ✅ CLI fina sobre el core (f.8, D1).
 - ✅ Config TOML portable-first (f.4, D9).
 
