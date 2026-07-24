@@ -64,6 +64,15 @@ fn main() -> ExitCode {
         }
     }
 
+    // Hotkey de región: se resuelve en el hilo de UI (overlay), no en el
+    // orquestador; run_message_loop lo traduce a WM_APP_REGION.
+    let region_hotkey = Hotkey::parse(&config.hotkeys.region)
+        .ok()
+        .and_then(|hk| hotkeys.register(hk).ok());
+    if region_hotkey.is_none() {
+        platform_win::alerts::error_beep();
+    }
+
     // Hilo orquestador: construido dentro para no exigir Send a los
     // trait objects; solo cruzan Receiver, bindings y el loopback.
     let loopback = tx.clone();
@@ -111,7 +120,7 @@ fn main() -> ExitCode {
         }
     };
 
-    run_message_loop(&tx);
+    run_message_loop(&tx, region_hotkey, &bar);
 
     // WM_DESTROY ya envió Shutdown; soltar nuestro Sender y esperar.
     drop(tx);

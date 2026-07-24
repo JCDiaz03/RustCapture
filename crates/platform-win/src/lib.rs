@@ -10,5 +10,6 @@ pub mod clipboard;
 pub mod dpi;
 pub mod gdi;
 pub mod hotkeys;
+pub mod overlay;
 pub mod pixels;
 pub mod tray;

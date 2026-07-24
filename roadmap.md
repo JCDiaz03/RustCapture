@@ -36,6 +36,7 @@ Objetivo: capturar y sacar por portapapeles/archivo desde barra, hotkey y CLI. P
 
 ## 3. F2 — Resto de modos de captura
 
+- ✅ Overlay de selección de región (capa de selección de D10): activa botón «Región» y `ctrl+printscreen`; base de f.11-f.16.
 - ⏳ Objeto de ventana y menús (f.11, f.12).
 - ⏳ Región a mano alzada y región fija (f.14, f.15).
 - ⏳ Scroll capture (f.16) — el módulo de mayor riesgo técnico de la fase; referencia: implementación de ShareX.

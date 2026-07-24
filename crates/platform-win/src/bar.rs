@@ -23,6 +23,9 @@ use windows::core::{PCWSTR, w};
 
 /// Mensaje de callback del icono de bandeja (lo consume `tray`).
 pub(crate) const WM_TRAY: u32 = WM_APP + 1;
+/// Petición de selección de región (botón o hotkey): debe correr en el
+/// hilo de UI, nunca en el orquestador.
+pub(crate) const WM_APP_REGION: u32 = WM_APP + 2;
 
 const BTN_W: i32 = 78;
 const BTN_H: i32 = 30;
@@ -119,15 +122,20 @@ impl Bar {
     }
 }
 
-/// Bucle de mensajes del hilo UI. Los `WM_HOTKEY` (registrados con hwnd
-/// nulo) se traducen aquí a eventos del bus.
-pub fn run_message_loop(tx: &Sender<AppEvent>) {
+/// Bucle de mensajes del hilo UI. Los `WM_HOTKEY` (hwnd nulo) van al bus
+/// salvo el de región, que se traduce a `WM_APP_REGION` (UI).
+pub fn run_message_loop(tx: &Sender<AppEvent>, region_hotkey: Option<HotkeyId>, bar: &Bar) {
     let mut msg = MSG::default();
     // SAFETY: bucle GetMessage estándar del hilo que posee las ventanas.
     unsafe {
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
             if msg.message == WM_HOTKEY && msg.hwnd.is_invalid() {
-                let _ = tx.send(AppEvent::HotkeyPressed(HotkeyId(msg.wParam.0 as u32)));
+                let id = HotkeyId(msg.wParam.0 as u32);
+                if Some(id) == region_hotkey {
+                    _ = PostMessageW(Some(bar.hwnd), WM_APP_REGION, WPARAM(0), LPARAM(0));
+                } else {
+                    let _ = tx.send(AppEvent::HotkeyPressed(id));
+                }
                 continue;
             }
             _ = TranslateMessage(&msg);
@@ -155,6 +163,12 @@ pub(crate) fn on_command(hwnd: HWND, id: u16) {
     match id {
         ID_FULLSCREEN | MENU_FULLSCREEN => enviar_captura(hwnd, ModeRequest::Fullscreen),
         ID_WINDOW | MENU_WINDOW => enviar_captura(hwnd, ModeRequest::ActiveWindow),
+        // f.13 interactiva: el overlay corre en el hilo de UI; se
+        // despacha como mensaje para salir del contexto del clic.
+        ID_REGION => {
+            // SAFETY: post a la propia ventana del wndproc.
+            unsafe { _ = PostMessageW(Some(hwnd), WM_APP_REGION, WPARAM(0), LPARAM(0)) };
+        }
         // f.17: captura del monitor activo tras el retardo configurado.
         ID_DELAY => {
             if let Some(state) = state_ref(hwnd) {
@@ -194,6 +208,24 @@ pub(crate) fn on_command(hwnd: HWND, id: u16) {
     }
 }
 
+/// Oculta la barra, abre el overlay y publica la región elegida.
+fn flujo_region(hwnd: HWND) {
+    // SAFETY: hwnd válido (viene del wndproc); ocultar/mostrar la propia
+    // ventana alrededor del overlay para no salir en la captura.
+    unsafe {
+        _ = ShowWindow(hwnd, SW_HIDE);
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        let resultado = crate::overlay::select_region();
+        _ = ShowWindow(hwnd, SW_SHOW);
+        if let (Some(rect), Some(state)) = (resultado, state_ref(hwnd)) {
+            let _ = state.tx.send(AppEvent::CaptureRequested(CaptureRequest {
+                mode: ModeRequest::Region(rect),
+                destination: state.destination,
+            }));
+        }
+    }
+}
+
 fn crear_botones(hwnd: HWND) {
     // Cabecera: minimizar (ocultar a bandeja) y cerrar (= Salir).
     // Owner-draw: WM_DRAWITEM los pinta con DrawFrameControl, los
@@ -228,7 +260,7 @@ fn crear_botones(hwnd: HWND) {
     let botones: [(u16, PCWSTR, bool); 6] = [
         (ID_FULLSCREEN, w!("Pantalla"), true),
         (ID_WINDOW, w!("Ventana"), true),
-        (ID_REGION, w!("Región"), false),
+        (ID_REGION, w!("Región"), true),
         (ID_DELAY, w!("Delay"), true),
         (ID_RECORD, w!("Grabar"), false),
         (ID_CONFIG, w!("Config"), false),
@@ -335,6 +367,10 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     }
                     _ => DefWindowProcW(hwnd, msg, wparam, lparam),
                 }
+            }
+            m if m == WM_APP_REGION => {
+                flujo_region(hwnd);
+                LRESULT(0)
             }
             m if m == WM_TRAY => {
                 crate::tray::on_tray_message(hwnd, lparam);

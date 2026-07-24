@@ -90,10 +90,13 @@ El paquete del directorio `/crates/core` se llama `rustcapture-core`: un paquete
 **Hacemos:** un solo struct `Config` serializado a TOML. Al arrancar: si existe `config.toml` junto al exe → modo portable; si no → `%APPDATA%`.
 **Para conseguir:** que compilada/portable sea un detalle de runtime, no dos builds distintas (feature 4).
 
-## D10 — Overlay de selección y de anotación: la misma superficie
+## D10 — Overlay por capas: selección primero, anotación encima
 
-**Hacemos:** el overlay de captura es una ventana fullscreen sin bordes que renderiza el frame congelado, y le montamos encima el motor de anotación de D5.
-**Para conseguir:** anotar-antes-de-capturar al estilo Flameshot (feature 20) sin escribir un segundo editor: seleccionar, anotar ahí mismo, Enter ejecuta el pipeline de salida. El editor completo queda para la edición con calma.
+**Hacemos:** el overlay de captura es una ventana fullscreen (escritorio virtual completo) que renderiza el frame congelado, construida en dos capas independientes:
+- **Capa de selección** `(platform-win/overlay)`: máscara blanca al 50 %, arrastre de rectángulo que se ve limpio, crosshair y lupa 200×200 con salto de esquina. Produce un `Rect` en coordenadas de escritorio — el mismo que la CLI parsea con `--region` — y publica `CaptureRequested(Region(rect))`; el pipeline no distingue productores. Corre en el hilo de UI con bucle modal; la barra se auto-oculta mientras tanto. Es la base sobre la que se montan mano alzada, región fija y el picking de ventana/objeto.
+- **Capa de anotación** (F4): el motor de D5 encima de la misma superficie; con ella la entrega pasa a ser el frame congelado editado (WYSIWYG estricto).
+
+**Para conseguir:** anotar-antes-de-capturar al estilo Flameshot (feature 20) sin escribir un segundo editor, y que todos los modos interactivos de captura compartan una única superficie de selección.
 
 ## D11 — Barra, bandeja y hotkeys en Win32 puro
 

@@ -17,6 +17,16 @@ pub fn rgba_to_bgra(pixels: &mut [u8]) {
     }
 }
 
+/// Mezcla cada canal RGB con blanco al 50 % (máscara del overlay, D10);
+/// el alfa no se toca.
+pub fn whiten_half(pixels: &mut [u8]) {
+    for px in pixels.chunks_exact_mut(4) {
+        for c in &mut px[..3] {
+            *c = ((*c as u16 + 255) / 2) as u8;
+        }
+    }
+}
+
 /// Reordena las filas de arriba-abajo a abajo-arriba (DIB bottom-up,
 /// el formato que más aplicaciones aceptan en CF_DIB).
 pub fn rows_bottom_up(pixels: &[u8], width: u32, height: u32) -> Vec<u8> {
@@ -68,5 +78,19 @@ mod tests {
     fn rows_bottom_up_de_una_fila_es_identidad() {
         let px: Vec<u8> = vec![7, 8, 9, 255, 1, 2, 3, 255];
         assert_eq!(rows_bottom_up(&px, 2, 1), px);
+    }
+
+    #[test]
+    fn whiten_half_mezcla_con_blanco_al_cincuenta() {
+        let mut px = vec![0u8, 100, 255, 42];
+        whiten_half(&mut px);
+        assert_eq!(px, vec![127, 177, 255, 42]); // alfa intacto
+    }
+
+    #[test]
+    fn whiten_half_es_idempotente_en_blanco_puro() {
+        let mut px = vec![255u8, 255, 255, 255];
+        whiten_half(&mut px);
+        assert_eq!(px, vec![255, 255, 255, 255]);
     }
 }

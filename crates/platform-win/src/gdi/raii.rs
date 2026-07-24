@@ -54,7 +54,7 @@ impl Drop for MemDc {
 /// DIB de 32 bits top-down: los bits viven en memoria del proceso.
 pub(crate) struct Dib {
     pub(crate) bitmap: HBITMAP,
-    bits: *const u8,
+    bits: *mut u8,
     len: usize,
 }
 
@@ -81,7 +81,7 @@ impl Dib {
             unsafe { CreateDIBSection(Some(dc.0), &info, DIB_RGB_COLORS, &mut bits, None, 0)? };
         Ok(Self {
             bitmap,
-            bits: bits as *const u8,
+            bits: bits as *mut u8,
             len: width as usize * height as usize * 4,
         })
     }
@@ -91,7 +91,14 @@ impl Dib {
     pub(crate) fn bits(&self) -> &[u8] {
         // SAFETY: el buffer pertenece al HBITMAP vivo (self) y mide
         // exactamente `len` bytes (32 bpp * w * h).
-        unsafe { core::slice::from_raw_parts(self.bits, self.len) }
+        unsafe { core::slice::from_raw_parts(self.bits.cast_const(), self.len) }
+    }
+
+    /// Bits BGRA escribibles (para volcar un frame al bitmap).
+    pub(crate) fn bits_mut(&mut self) -> &mut [u8] {
+        // SAFETY: mismo buffer y longitud que bits(); acceso exclusivo
+        // garantizado por &mut self.
+        unsafe { core::slice::from_raw_parts_mut(self.bits, self.len) }
     }
 }
 

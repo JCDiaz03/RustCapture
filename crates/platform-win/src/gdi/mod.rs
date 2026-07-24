@@ -6,7 +6,7 @@
 //! `capture_region` viven y mueren dentro de la llamada, pero el uso
 //! previsto es un único hilo orquestador.
 
-mod raii;
+pub(crate) mod raii;
 
 use rustcapture_core::ports::{Frame, Rect, ScreenSource, ScreenSourceError};
 use windows::Win32::Foundation::{POINT, RECT};
