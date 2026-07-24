@@ -29,7 +29,7 @@ Objetivo: capturar y sacar por portapapeles/archivo desde barra, hotkey y CLI. P
 - ✅ Adapter de captura GDI en `platform-win` con DPI per-monitor (f.6) — WGC diferido como adapter alternativo.
 - ✅ Bus de eventos mpsc + orquestador (D7).
 - ✅ Modos: pantalla completa, ventana activa, región rectangular (f.9, f.10, f.13) como strategies `CaptureMode` (D4).
-- ⏳ Salidas: portapapeles y archivo con nombres automáticos (f.40, f.41); PNG y JPEG.
+- ✅ Salidas: portapapeles y archivo con nombres automáticos (f.40, f.41); PNG y JPEG.
 - ⏳ Barra flotante mínima + icono en bandeja + hotkeys globales (f.1-f.3).
 - ⏳ CLI fina sobre el core (f.8, D1).
 - ⏳ Config TOML portable-first (f.4, D9).

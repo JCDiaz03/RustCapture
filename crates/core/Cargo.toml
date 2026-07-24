@@ -5,3 +5,6 @@ edition.workspace = true
 
 [dependencies]
 thiserror = { workspace = true }
+png = { workspace = true }
+jpeg-encoder = { workspace = true }
+time = { workspace = true }

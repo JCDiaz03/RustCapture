@@ -15,3 +15,6 @@ edition = "2024"
 rustcapture-core = { path = "crates/core" }
 platform-win = { path = "crates/platform-win" }
 thiserror = "2"
+png = "0.18"
+jpeg-encoder = "0.7"
+time = { version = "0.3", features = ["local-offset"] }
