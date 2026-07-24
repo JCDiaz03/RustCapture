@@ -372,6 +372,15 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 flujo_region(hwnd);
                 LRESULT(0)
             }
+            m if m == crate::editor::WM_APP_EDITOR => {
+                // SAFETY: wparam es un Box<Frame> publicado por
+                // EditorSink; se toma posesión SIEMPRE.
+                let frame = *Box::from_raw(wparam.0 as *mut rustcapture_core::ports::Frame);
+                _ = ShowWindow(hwnd, SW_HIDE);
+                crate::editor::show_editor(frame);
+                _ = ShowWindow(hwnd, SW_SHOW);
+                LRESULT(0)
+            }
             m if m == WM_TRAY => {
                 crate::tray::on_tray_message(hwnd, lparam);
                 LRESULT(0)

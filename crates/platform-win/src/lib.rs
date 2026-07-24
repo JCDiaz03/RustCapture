@@ -8,6 +8,7 @@ pub mod alerts;
 pub mod bar;
 pub mod clipboard;
 pub mod dpi;
+pub mod editor;
 pub mod gdi;
 pub mod hotkeys;
 pub mod overlay;

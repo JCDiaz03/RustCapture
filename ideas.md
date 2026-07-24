@@ -44,7 +44,7 @@ Desarrollo: IA-first (Opus 4.8 / Fable 5).
 ### Anotación y edición
 
 20. Anotación directamente en el overlay de selección: la pantalla se congela y se dibuja sobre la selección antes de confirmar la captura. *(Robo de Flameshot — mejora clave de UX sobre FastStone)*
-21. Editor integrado: la captura aterriza en él sin pasos intermedios.
+21. Editor integrado: la captura aterriza en él sin pasos intermedios. Es el destino por defecto de las capturas de la GUI (la barra se oculta mientras el editor está abierto); portapapeles/archivo directos quedan como opción de config y como flujo de la CLI.
 22. Herramientas de anotación: texto, flechas, líneas, formas, resaltado.
 23. Herramienta de pasos numerados (1, 2, 3…).
 24. Leyendas/captions con estilos de borde.

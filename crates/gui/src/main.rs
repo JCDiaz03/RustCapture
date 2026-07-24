@@ -73,6 +73,24 @@ fn main() -> ExitCode {
         platform_win::alerts::error_beep();
     }
 
+    // La barra se crea ANTES del hilo orquestador: EditorSink necesita
+    // su hwnd para publicar las capturas al hilo de UI.
+    let bar = match Bar::create(tx.clone(), destination, delay_ms) {
+        Ok(b) => b,
+        Err(e) => {
+            platform_win::alerts::error_box("RustCapture", &e);
+            return ExitCode::FAILURE;
+        }
+    };
+    let _tray = match Tray::new(bar.hwnd_raw()) {
+        Ok(t) => t,
+        Err(e) => {
+            platform_win::alerts::error_box("RustCapture", &e);
+            return ExitCode::FAILURE;
+        }
+    };
+    let bar_raw = bar.hwnd_raw();
+
     // Hilo orquestador: construido dentro para no exigir Send a los
     // trait objects; solo cruzan Receiver, bindings y el loopback.
     let loopback = tx.clone();
@@ -86,6 +104,8 @@ fn main() -> ExitCode {
             FileSink::new(out.dir, out.format).with_prefix(out.prefix),
         ))
         .expect("sink único");
+        orch.add_sink(Box::new(platform_win::editor::EditorSink::new(bar_raw)))
+            .expect("sink único");
         for (id, request) in bindings {
             orch.bind_hotkey(id, request);
         }
@@ -104,21 +124,6 @@ fn main() -> ExitCode {
             Ok(Flow::Shutdown) => {}
         });
     });
-
-    let bar = match Bar::create(tx.clone(), destination, delay_ms) {
-        Ok(b) => b,
-        Err(e) => {
-            platform_win::alerts::error_box("RustCapture", &e);
-            return ExitCode::FAILURE;
-        }
-    };
-    let _tray = match Tray::new(bar.hwnd_raw()) {
-        Ok(t) => t,
-        Err(e) => {
-            platform_win::alerts::error_box("RustCapture", &e);
-            return ExitCode::FAILURE;
-        }
-    };
 
     run_message_loop(&tx, region_hotkey, &bar);
 

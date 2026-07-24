@@ -10,7 +10,7 @@
 
 ## 0. Estado general
 
-🔵 **Fase actual: F2 — Resto de modos de captura.** F1 completada: el MVP captura a diario desde barra, bandeja, hotkeys y CLI.
+🔵 **Fase actual: F3 — Editor y anotación (adelantada por decisión de producto).** F1 completada; F2 en pausa con el overlay de selección hecho (quedan picking de ventana/objeto, mano alzada, región fija, scroll y f.7/f.19).
 
 ## 1. F0 — Diseño y preparación del entorno
 
@@ -45,6 +45,7 @@ Objetivo: capturar y sacar por portapapeles/archivo desde barra, hotkey y CLI. P
 
 ## 4. F3 — Editor y anotación (D5 + D6)
 
+- ✅ Slice A — Editor shell (f.21): captura → ventana de editor (Guardar como/Copiar/Draw/Cerrar), barra auto-oculta, destino "editor" por defecto.
 - ⏳ Modelo de documento: objetos `Annotation`, Strategy + Factory, `Canvas` sobre frame RGBA (D5).
 - ⏳ Command pattern con undo/redo (D6).
 - ⏳ Herramientas: texto, flechas, líneas, formas, resaltado, pasos numerados, leyendas, pixelado, goma (f.22-f.27).

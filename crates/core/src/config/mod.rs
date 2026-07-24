@@ -75,7 +75,7 @@ impl Default for OutputConfig {
             dir: PathBuf::from("."),
             format: ImageFormat::Png,
             prefix: "captura".to_string(),
-            destination: DestinationKind::Clipboard,
+            destination: DestinationKind::Editor,
         }
     }
 }
@@ -251,14 +251,14 @@ mod tests {
     }
 
     #[test]
-    fn el_destino_por_defecto_es_clipboard_y_se_puede_cambiar() {
+    fn el_destino_por_defecto_es_editor_y_se_puede_cambiar() {
         use crate::output::DestinationKind;
         assert_eq!(
             Config::default().output.destination,
-            DestinationKind::Clipboard
+            DestinationKind::Editor
         );
-        let config = Config::from_toml("[output]\ndestination = \"file\"\n").unwrap();
-        assert_eq!(config.output.destination, DestinationKind::File);
+        let config = Config::from_toml("[output]\ndestination = \"clipboard\"\n").unwrap();
+        assert_eq!(config.output.destination, DestinationKind::Clipboard);
     }
 
     #[test]

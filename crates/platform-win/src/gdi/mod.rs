@@ -21,6 +21,16 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::Result as WinResult;
 
+/// Vuelca un `Frame` RGBA del core a un DIB BGRA seleccionable en GDI.
+/// Compartido por el overlay y el editor.
+pub(crate) fn dib_from_frame(dc: &raii::MemDc, frame: &Frame) -> windows::core::Result<raii::Dib> {
+    let mut dib = raii::Dib::new_32bpp(dc, frame.width, frame.height)?;
+    let mut px = frame.pixels.clone();
+    crate::pixels::rgba_to_bgra(&mut px);
+    dib.bits_mut().copy_from_slice(&px);
+    Ok(dib)
+}
+
 /// `ScreenSource` real sobre GDI. Sin estado entre capturas: cada
 /// `capture_region` crea y destruye sus recursos (RAII).
 pub struct GdiScreenSource;

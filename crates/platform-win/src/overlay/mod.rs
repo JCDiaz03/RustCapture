@@ -7,7 +7,7 @@
 
 pub(crate) mod math;
 
-use rustcapture_core::ports::{Frame, Rect, ScreenSource};
+use rustcapture_core::ports::{Rect, ScreenSource};
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, BitBlt, CLIP_DEFAULT_PRECIS, COLOR_BTNFACE, COLORONCOLOR, CreateFontW,
@@ -83,13 +83,7 @@ fn crear_cursor_cruz() -> Option<HCURSOR> {
     }
 }
 
-fn dib_from_frame(dc: &MemDc, frame: &Frame) -> windows::core::Result<Dib> {
-    let mut dib = Dib::new_32bpp(dc, frame.width, frame.height)?;
-    let mut px = frame.pixels.clone();
-    crate::pixels::rgba_to_bgra(&mut px);
-    dib.bits_mut().copy_from_slice(&px);
-    Ok(dib)
-}
+use crate::gdi::dib_from_frame;
 
 fn run() -> windows::core::Result<Option<Rect>> {
     // Congelar el escritorio completo.

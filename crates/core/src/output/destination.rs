@@ -4,9 +4,11 @@
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum DestinationKind {
-    #[default]
     Clipboard,
     File,
+    /// La captura aterriza en el editor (f.21) — flujo por defecto de la GUI.
+    #[default]
+    Editor,
 }
 
 impl DestinationKind {
@@ -15,6 +17,7 @@ impl DestinationKind {
         match self {
             DestinationKind::Clipboard => "clipboard",
             DestinationKind::File => "file",
+            DestinationKind::Editor => "editor",
         }
     }
 }
@@ -27,5 +30,11 @@ mod tests {
     fn los_sink_ids_coinciden_con_los_sinks_reales() {
         assert_eq!(DestinationKind::Clipboard.sink_id(), "clipboard");
         assert_eq!(DestinationKind::File.sink_id(), "file");
+        assert_eq!(DestinationKind::Editor.sink_id(), "editor");
+    }
+
+    #[test]
+    fn el_default_es_editor() {
+        assert_eq!(DestinationKind::default(), DestinationKind::Editor);
     }
 }
