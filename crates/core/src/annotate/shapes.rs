@@ -1,5 +1,12 @@
 //! Rasterización pura de formas (sin antialiasing, MVP). Interna: las
 //! anotaciones son la API pública.
+//!
+//! PENDIENTE(corrección futura): línea y elipse estampan discos con
+//! solape, y cada estampado mezcla con alfa — con colores alfa < 255 los
+//! píxeles solapados se mezclan varias veces (manchas oscuras). Hoy no
+//! afecta (solo el resaltador usa alfa y es un fill sin solape), pero al
+//! añadir opacidad por herramienta habrá que acumular una máscara de
+//! cobertura por trazo y mezclar UNA vez.
 
 use crate::annotate::canvas::Canvas;
 use crate::annotate::style::{Color, Style};
@@ -82,6 +89,9 @@ pub(crate) fn draw_ellipse_outline(canvas: &mut Canvas, rect: Rect, style: &Styl
     }
 }
 
+// PENDIENTE(rendimiento): pasa por blend_pixel píxel a píxel (bounds
+// check + índice por píxel). Si los resaltadores grandes se notan
+// lentos, clampear el rect una vez y recorrer por filas (~2-3×).
 pub(crate) fn fill_rect_blend(canvas: &mut Canvas, rect: Rect, color: Color) {
     for y in rect.y..rect.y + rect.height as i32 {
         for x in rect.x..rect.x + rect.width as i32 {

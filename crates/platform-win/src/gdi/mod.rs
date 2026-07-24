@@ -22,13 +22,20 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::Result as WinResult;
 
 /// Vuelca un `Frame` RGBA del core a un DIB BGRA seleccionable en GDI.
-/// Compartido por el overlay y el editor.
+/// Compartido por overlay, editor y dibujo.
 pub(crate) fn dib_from_frame(dc: &raii::MemDc, frame: &Frame) -> windows::core::Result<raii::Dib> {
     let mut dib = raii::Dib::new_32bpp(dc, frame.width, frame.height)?;
-    let mut px = frame.pixels.clone();
-    crate::pixels::rgba_to_bgra(&mut px);
-    dib.bits_mut().copy_from_slice(&px);
+    copy_frame_to_dib(frame, &mut dib);
     Ok(dib)
+}
+
+/// Copia un `Frame` a un DIB YA existente de las mismas dimensiones,
+/// convirtiendo RGBA→BGRA in situ — cero asignaciones. Es la pieza que
+/// permite reutilizar DIBs en los caminos calientes (preview del dibujo).
+pub(crate) fn copy_frame_to_dib(frame: &Frame, dib: &mut raii::Dib) {
+    let bits = dib.bits_mut();
+    bits.copy_from_slice(&frame.pixels);
+    crate::pixels::rgba_to_bgra(bits);
 }
 
 /// `ScreenSource` real sobre GDI. Sin estado entre capturas: cada

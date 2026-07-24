@@ -102,6 +102,10 @@ struct DrawState {
     base: Frame,
     committed: Frame,
     committed_dib: Dib,
+    /// Buffers persistentes del preview: se reescriben en cada arrastre
+    /// sin asignar memoria (las dimensiones nunca cambian).
+    preview: Frame,
+    preview_dib: Dib,
     doc: Document,
     history: History,
     ctx: RenderContext,
@@ -146,6 +150,8 @@ fn run(base: Frame) -> windows::core::Result<Option<Frame>> {
     let dc = MemDc::compatible_with(&screen)?;
     let committed = base.clone();
     let committed_dib = dib_from_frame(&dc, &committed)?;
+    let preview = committed.clone();
+    let preview_dib = dib_from_frame(&dc, &preview)?;
     drop(dc);
     drop(screen);
 
@@ -156,6 +162,8 @@ fn run(base: Frame) -> windows::core::Result<Option<Frame>> {
         base,
         committed,
         committed_dib,
+        preview,
+        preview_dib,
         doc: Document::new(),
         history: History::new(),
         ctx,
@@ -216,6 +224,8 @@ fn state_mut<'a>(hwnd: HWND) -> Option<&'a mut DrawState> {
     unsafe { ((GetWindowLongPtrW(hwnd, GWLP_USERDATA)) as *mut DrawState).as_mut() }
 }
 
+// PENDIENTE(limpieza): duplicada en overlay/mod.rs (y `wide` está en
+// alerts y editor); extraer a un módulo util interno del crate.
 fn punto(lparam: LPARAM) -> (i32, i32) {
     (
         (lparam.0 & 0xFFFF) as i16 as i32,
@@ -223,16 +233,12 @@ fn punto(lparam: LPARAM) -> (i32, i32) {
     )
 }
 
-/// Regenera el frame comprometido (base + documento) y su DIB.
+/// Regenera el frame comprometido (base + documento) sobre los buffers
+/// existentes — sin asignar (las dimensiones son fijas).
 fn refresh_committed(state: &mut DrawState) {
-    state.committed = state.base.clone();
+    state.committed.pixels.copy_from_slice(&state.base.pixels);
     state.doc.render_onto(&mut state.committed, &state.ctx);
-    if let Ok(screen) = ScreenDc::get()
-        && let Ok(dc) = MemDc::compatible_with(&screen)
-        && let Ok(dib) = dib_from_frame(&dc, &state.committed)
-    {
-        state.committed_dib = dib;
-    }
+    crate::gdi::copy_frame_to_dib(&state.committed, &mut state.committed_dib);
 }
 
 /// Área del lienzo (cliente menos paleta y barra) y rect destino encajado.
@@ -275,6 +281,9 @@ fn anotacion_en_curso(state: &DrawState) -> Option<Box<dyn Annotation>> {
             to: drag.current,
             style,
         }),
+        // PENDIENTE(rendimiento): clona los puntos en cada repintado del
+        // arrastre (O(n) por frame). Solo importa con trazos larguísimos;
+        // arreglable pasando el builder a préstamos.
         Tool::Pen => Box::new(PenAnnotation {
             points: drag.points.clone(),
             style,
@@ -844,18 +853,22 @@ fn pintar(hwnd: HWND, hdc: HDC, state: &mut DrawState) -> windows::core::Result<
     let screen = ScreenDc::get()?;
     let src_dc = MemDc::compatible_with(&screen)?;
 
-    // DIB temporal solo durante el arrastre (preview de la anotación).
-    let temporal = if let Some(anotacion) = anotacion_en_curso(state) {
-        let mut preview = state.committed.clone();
+    // Preview del arrastre sobre los buffers persistentes: dos memcpy y
+    // cero asignaciones por repintado (camino caliente del mousemove).
+    let dib = if let Some(anotacion) = anotacion_en_curso(state) {
+        state
+            .preview
+            .pixels
+            .copy_from_slice(&state.committed.pixels);
         {
-            let mut canvas = rustcapture_core::annotate::Canvas::new(&mut preview);
+            let mut canvas = rustcapture_core::annotate::Canvas::new(&mut state.preview);
             anotacion.render(&mut canvas, &state.ctx);
         }
-        Some(dib_from_frame(&src_dc, &preview)?)
+        crate::gdi::copy_frame_to_dib(&state.preview, &mut state.preview_dib);
+        &state.preview_dib
     } else {
-        None
+        &state.committed_dib
     };
-    let dib = temporal.as_ref().unwrap_or(&state.committed_dib);
     let _s = Selected::bitmap(&src_dc, dib)?;
     // SAFETY: DCs vivos; blits estándar.
     unsafe {

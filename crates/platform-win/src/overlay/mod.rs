@@ -210,6 +210,11 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             WM_MOUSEMOVE => {
                 if let Some(state) = state_mut(hwnd) {
                     state.cursor = punto(lparam);
+                    // PENDIENTE(rendimiento): se invalida el escritorio
+                    // virtual COMPLETO por movimiento (2 blits fullscreen
+                    // por frame). Si en multi-monitor 4K se nota lag,
+                    // invalidar solo la unión de selección vieja/nueva +
+                    // caja de lupa vieja/nueva.
                     _ = InvalidateRect(Some(hwnd), None, false);
                 }
                 LRESULT(0)
