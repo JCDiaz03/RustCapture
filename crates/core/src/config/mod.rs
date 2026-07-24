@@ -12,6 +12,26 @@ use crate::output::{DestinationKind, ImageFormat};
 pub struct Config {
     pub output: OutputConfig,
     pub hotkeys: HotkeysConfig,
+    pub capture: CaptureConfig,
+}
+
+/// Parámetros de captura (f.17: retardo del botón/hotkey Delay).
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
+#[serde(default)]
+pub struct CaptureConfig {
+    pub delay_seconds: u32,
+}
+
+impl Default for CaptureConfig {
+    fn default() -> Self {
+        Self { delay_seconds: 5 }
+    }
+}
+
+impl CaptureConfig {
+    pub fn delay_ms(&self) -> u64 {
+        u64::from(self.delay_seconds) * 1_000
+    }
 }
 
 /// Atajos globales (f.3) como strings "ctrl+alt+tecla"; se parsean con
@@ -197,6 +217,19 @@ mod tests {
         config.save(&path).unwrap();
         assert_eq!(Config::load(&path).unwrap(), config);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn el_retardo_por_defecto_es_cinco_segundos() {
+        let config = Config::default();
+        assert_eq!(config.capture.delay_seconds, 5);
+        assert_eq!(config.capture.delay_ms(), 5_000);
+    }
+
+    #[test]
+    fn el_retardo_se_configura_en_toml() {
+        let config = Config::from_toml("[capture]\ndelay_seconds = 3\n").unwrap();
+        assert_eq!(config.capture.delay_ms(), 3_000);
     }
 
     #[test]

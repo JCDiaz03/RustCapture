@@ -19,6 +19,9 @@ MODOS (por defecto: --fullscreen):
   --window                ventana activa
   --region X,Y,WxH        región en coordenadas de escritorio (p. ej. 0,0,800x600)
 
+OPCIONES:
+  --delay N               espera N segundos antes de capturar
+
 DESTINO (por defecto: --clipboard):
   --clipboard             copiar al portapapeles
   --file                  guardar en archivo con nombre automático
@@ -30,6 +33,8 @@ DESTINO (por defecto: --clipboard):
 pub struct CliOptions {
     pub mode: ModeRequest,
     pub destination: Destination,
+    /// f.17: retardo local antes de capturar (la CLI duerme, sin bus).
+    pub delay_seconds: Option<u64>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -56,6 +61,10 @@ pub fn parse(raw: Vec<OsString>) -> Result<CliOptions, String> {
         (false, false, Some(spec)) => ModeRequest::Region(parse_region(spec)?),
         _ => return Err("elige un único modo: --fullscreen, --window o --region".into()),
     };
+
+    let delay_seconds: Option<u64> = args
+        .opt_value_from_str("--delay")
+        .map_err(|e| e.to_string())?;
 
     let clipboard = args.contains("--clipboard");
     let file = args.contains("--file");
@@ -87,7 +96,11 @@ pub fn parse(raw: Vec<OsString>) -> Result<CliOptions, String> {
     if !sobrantes.is_empty() {
         return Err(format!("argumentos no reconocidos: {sobrantes:?}"));
     }
-    Ok(CliOptions { mode, destination })
+    Ok(CliOptions {
+        mode,
+        destination,
+        delay_seconds,
+    })
 }
 
 /// "X,Y,WxH" → `Rect` (X e Y admiten negativos, multi-monitor).
@@ -179,5 +192,16 @@ mod tests {
     #[test]
     fn flag_desconocida_es_error() {
         assert!(p(&["--sepia"]).is_err());
+    }
+
+    #[test]
+    fn delay_parsea_segundos() {
+        assert_eq!(p(&["--delay", "3"]).unwrap().delay_seconds, Some(3));
+        assert_eq!(p(&[]).unwrap().delay_seconds, None);
+    }
+
+    #[test]
+    fn delay_no_numerico_es_error() {
+        assert!(p(&["--delay", "tres"]).is_err());
     }
 }

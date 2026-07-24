@@ -6,7 +6,8 @@ mod events;
 
 pub use events::{AppEvent, CaptureRequest, ModeRequest};
 
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{Receiver, Sender};
+use std::time::Duration;
 
 use crate::capture::{CaptureError, CaptureMode};
 use crate::ports::{HotkeyId, OutputError, OutputSink, ScreenSource};
@@ -23,6 +24,11 @@ pub enum OrchestratorError {
     UnknownSink(&'static str),
     #[error("atajo sin binding: {0:?}")]
     UnknownHotkey(HotkeyId),
+    /// `DelayedCapture` exige loopback (`set_loopback`); la CLI no lo usa.
+    #[error("captura con retardo no disponible sin loopback")]
+    DelayUnavailable,
+    #[error("no hay captura previa que repetir")]
+    NothingToRepeat,
     #[error(transparent)]
     Capture(#[from] CaptureError),
     #[error(transparent)]
@@ -40,7 +46,9 @@ pub struct Orchestrator {
     source: Box<dyn ScreenSource>,
     mode_factory: ModeFactory,
     sinks: Vec<Box<dyn OutputSink>>,
-    bindings: Vec<(HotkeyId, CaptureRequest)>,
+    bindings: Vec<(HotkeyId, AppEvent)>,
+    loopback: Option<Sender<AppEvent>>,
+    last_request: Option<CaptureRequest>,
 }
 
 impl Orchestrator {
@@ -50,7 +58,15 @@ impl Orchestrator {
             mode_factory,
             sinks: Vec::new(),
             bindings: Vec::new(),
+            loopback: None,
+            last_request: None,
         }
+    }
+
+    /// Canal de reentrada para eventos programados (D7): el hilo
+    /// temporizador de `DelayedCapture` publica aquí.
+    pub fn set_loopback(&mut self, tx: Sender<AppEvent>) {
+        self.loopback = Some(tx);
     }
 
     pub fn add_sink(&mut self, sink: Box<dyn OutputSink>) -> Result<(), OrchestratorError> {
@@ -61,17 +77,17 @@ impl Orchestrator {
         Ok(())
     }
 
-    /// Asocia un hotkey a una petición; rebindear reemplaza (recarga de config).
-    pub fn bind_hotkey(&mut self, id: HotkeyId, request: CaptureRequest) {
+    /// Asocia un hotkey a un evento; rebindear reemplaza (recarga de config).
+    pub fn bind_hotkey(&mut self, id: HotkeyId, event: AppEvent) {
         if let Some(entry) = self.bindings.iter_mut().find(|(i, _)| *i == id) {
-            entry.1 = request;
+            entry.1 = event;
         } else {
-            self.bindings.push((id, request));
+            self.bindings.push((id, event));
         }
     }
 
-    pub fn binding(&self, id: HotkeyId) -> Option<&CaptureRequest> {
-        self.bindings.iter().find(|(i, _)| *i == id).map(|(_, r)| r)
+    pub fn binding(&self, id: HotkeyId) -> Option<&AppEvent> {
+        self.bindings.iter().find(|(i, _)| *i == id).map(|(_, e)| e)
     }
 
     /// Procesa un evento de forma síncrona. `run` lo llama en bucle; los
@@ -80,15 +96,36 @@ impl Orchestrator {
         match event {
             AppEvent::CaptureRequested(request) => {
                 self.capture_and_deliver(&request)?;
+                self.last_request = Some(request);
+                Ok(Flow::Continue)
+            }
+            AppEvent::DelayedCapture { request, delay_ms } => {
+                let tx = self
+                    .loopback
+                    .clone()
+                    .ok_or(OrchestratorError::DelayUnavailable)?;
+                // D7: el orquestador nunca duerme; espera un hilo productor.
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(delay_ms));
+                    let _ = tx.send(AppEvent::CaptureRequested(request));
+                });
+                Ok(Flow::Continue)
+            }
+            AppEvent::RepeatLast => {
+                let request = self
+                    .last_request
+                    .clone()
+                    .ok_or(OrchestratorError::NothingToRepeat)?;
+                self.capture_and_deliver(&request)?;
                 Ok(Flow::Continue)
             }
             AppEvent::HotkeyPressed(id) => {
-                let request = self
+                let event = self
                     .binding(id)
                     .cloned()
                     .ok_or(OrchestratorError::UnknownHotkey(id))?;
-                self.capture_and_deliver(&request)?;
-                Ok(Flow::Continue)
+                // Un binding es cualquier evento (captura, retardada...).
+                self.handle_event(event)
             }
             AppEvent::Shutdown => Ok(Flow::Shutdown),
         }
@@ -254,18 +291,12 @@ mod tests {
     }
 
     #[test]
-    fn hotkey_con_binding_ejecuta_la_peticion_asociada() {
+    fn hotkey_con_binding_ejecuta_el_evento_asociado() {
         let sink = MockOutputSink::new("clipboard");
         let entregas = sink.delivered_handle();
         let mut orch = orquestador();
         orch.add_sink(Box::new(sink)).unwrap();
-        orch.bind_hotkey(
-            HotkeyId(1),
-            CaptureRequest {
-                mode: ModeRequest::Fullscreen,
-                destination: "clipboard",
-            },
-        );
+        orch.bind_hotkey(HotkeyId(1), peticion("clipboard"));
 
         let flow = orch
             .handle_event(AppEvent::HotkeyPressed(HotkeyId(1)))
@@ -273,6 +304,78 @@ mod tests {
 
         assert_eq!(flow, Flow::Continue);
         assert_eq!(entregas.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn delayed_sin_loopback_devuelve_delay_unavailable() {
+        let mut orch = orquestador();
+        let evento = AppEvent::DelayedCapture {
+            request: CaptureRequest {
+                mode: ModeRequest::Fullscreen,
+                destination: "clipboard",
+            },
+            delay_ms: 1,
+        };
+        assert_eq!(
+            orch.handle_event(evento).unwrap_err(),
+            OrchestratorError::DelayUnavailable
+        );
+    }
+
+    #[test]
+    fn delayed_con_loopback_reenvia_la_peticion_tras_el_retardo() {
+        let mut orch = orquestador();
+        let (tx, rx) = std::sync::mpsc::channel();
+        orch.set_loopback(tx);
+        let request = CaptureRequest {
+            mode: ModeRequest::Fullscreen,
+            destination: "clipboard",
+        };
+        let flow = orch
+            .handle_event(AppEvent::DelayedCapture {
+                request: request.clone(),
+                delay_ms: 10,
+            })
+            .unwrap();
+        assert_eq!(flow, Flow::Continue);
+        // El hilo temporizador reenvía por el loopback.
+        let evento = rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("debería llegar la petición reenviada");
+        assert_eq!(evento, AppEvent::CaptureRequested(request));
+    }
+
+    #[test]
+    fn repeat_sin_captura_previa_devuelve_nothing_to_repeat() {
+        let mut orch = orquestador();
+        assert_eq!(
+            orch.handle_event(AppEvent::RepeatLast).unwrap_err(),
+            OrchestratorError::NothingToRepeat
+        );
+    }
+
+    #[test]
+    fn repeat_reejecuta_la_ultima_captura_con_exito() {
+        let sink = MockOutputSink::new("clipboard");
+        let entregas = sink.delivered_handle();
+        let mut orch = orquestador();
+        orch.add_sink(Box::new(sink)).unwrap();
+        orch.handle_event(peticion("clipboard")).unwrap();
+
+        orch.handle_event(AppEvent::RepeatLast).unwrap();
+
+        assert_eq!(entregas.lock().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn una_captura_fallida_no_se_convierte_en_ultima() {
+        let mut orch = orquestador();
+        // Sink inexistente: falla antes de capturar.
+        let _ = orch.handle_event(peticion("printer"));
+        assert_eq!(
+            orch.handle_event(AppEvent::RepeatLast).unwrap_err(),
+            OrchestratorError::NothingToRepeat
+        );
     }
 
     #[test]
@@ -329,17 +432,9 @@ mod tests {
     #[test]
     fn bind_hotkey_reemplaza_el_binding_anterior() {
         let mut orch = orquestador();
-        let a_region = CaptureRequest {
-            mode: ModeRequest::Fullscreen,
-            destination: "clipboard",
-        };
-        let a_archivo = CaptureRequest {
-            mode: ModeRequest::Fullscreen,
-            destination: "file",
-        };
-        orch.bind_hotkey(HotkeyId(1), a_region.clone());
-        orch.bind_hotkey(HotkeyId(1), a_archivo.clone());
-        assert_eq!(orch.binding(HotkeyId(1)), Some(&a_archivo));
+        orch.bind_hotkey(HotkeyId(1), peticion("clipboard"));
+        orch.bind_hotkey(HotkeyId(1), peticion("file"));
+        assert_eq!(orch.binding(HotkeyId(1)), Some(&peticion("file")));
         assert_eq!(orch.binding(HotkeyId(2)), None);
     }
 }

@@ -17,6 +17,14 @@ pub struct CaptureRequest {
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum AppEvent {
     CaptureRequested(CaptureRequest),
+    /// Captura programada (f.17): el orquestador lanza un hilo que espera
+    /// `delay_ms` y reenvía `CaptureRequested` por su loopback.
+    DelayedCapture {
+        request: CaptureRequest,
+        delay_ms: u64,
+    },
+    /// Repite la última captura ejecutada con éxito (f.18).
+    RepeatLast,
     HotkeyPressed(HotkeyId),
     Shutdown,
 }

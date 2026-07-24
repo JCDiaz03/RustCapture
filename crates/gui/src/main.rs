@@ -36,25 +36,41 @@ fn main() -> ExitCode {
 
     // Hotkeys: registrar en ESTE hilo — WM_HOTKEY llega a su cola y lo
     // traduce run_message_loop. Fallos: beep y seguimos (spec §Errores).
+    let delay_ms = config.capture.delay_ms();
     let mut hotkeys = Win32HotkeyProvider::new();
     let mut bindings = Vec::new();
-    for (spec, mode) in [
-        (&config.hotkeys.fullscreen, ModeRequest::Fullscreen),
-        (&config.hotkeys.window, ModeRequest::ActiveWindow),
-    ] {
+    let captura =
+        |mode: ModeRequest| AppEvent::CaptureRequested(CaptureRequest { mode, destination });
+    let eventos = [
+        (&config.hotkeys.fullscreen, captura(ModeRequest::Fullscreen)),
+        (&config.hotkeys.window, captura(ModeRequest::ActiveWindow)),
+        (
+            &config.hotkeys.delay,
+            AppEvent::DelayedCapture {
+                request: CaptureRequest {
+                    mode: ModeRequest::Fullscreen,
+                    destination,
+                },
+                delay_ms,
+            },
+        ),
+    ];
+    for (spec, event) in eventos {
         let registrado =
             Hotkey::parse(spec).and_then(|hk| hotkeys.register(hk).map_err(|e| e.to_string()));
         match registrado {
-            Ok(id) => bindings.push((id, CaptureRequest { mode, destination })),
+            Ok(id) => bindings.push((id, event)),
             Err(_) => platform_win::alerts::error_beep(),
         }
     }
 
     // Hilo orquestador: construido dentro para no exigir Send a los
-    // trait objects; solo cruzan Receiver y bindings.
+    // trait objects; solo cruzan Receiver, bindings y el loopback.
+    let loopback = tx.clone();
     let out = config.output.clone();
     let orch_thread = thread::spawn(move || {
         let mut orch = Orchestrator::new(Box::new(GdiScreenSource::new()), Box::new(create_mode));
+        orch.set_loopback(loopback);
         orch.add_sink(Box::new(ClipboardSink::new()))
             .expect("sink único");
         orch.add_sink(Box::new(
@@ -80,7 +96,7 @@ fn main() -> ExitCode {
         });
     });
 
-    let bar = match Bar::create(tx.clone(), destination) {
+    let bar = match Bar::create(tx.clone(), destination, delay_ms) {
         Ok(b) => b,
         Err(e) => {
             platform_win::alerts::error_box("RustCapture", &e);

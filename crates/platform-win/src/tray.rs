@@ -12,7 +12,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::w;
 
-use crate::bar::{MENU_FULLSCREEN, MENU_QUIT, MENU_TOGGLE, MENU_WINDOW, WM_TRAY};
+use crate::bar::{MENU_FULLSCREEN, MENU_QUIT, MENU_REPEAT, MENU_TOGGLE, MENU_WINDOW, WM_TRAY};
 
 /// Icono de bandeja con quita-y-pon RAII.
 pub struct Tray {
@@ -88,6 +88,12 @@ fn mostrar_menu(hwnd: HWND) {
             MF_STRING,
             MENU_WINDOW as usize,
             w!("Capturar ventana"),
+        );
+        _ = AppendMenuW(
+            menu,
+            MF_STRING,
+            MENU_REPEAT as usize,
+            w!("Repetir última captura"),
         );
         _ = AppendMenuW(menu, MF_SEPARATOR, 0, None);
         _ = AppendMenuW(

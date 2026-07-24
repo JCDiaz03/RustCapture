@@ -51,6 +51,11 @@ fn main() -> ExitCode {
         }
     };
 
+    // f.17 en CLI: proceso efímero, el retardo es un sleep local.
+    if let Some(segundos) = options.delay_seconds {
+        std::thread::sleep(std::time::Duration::from_secs(segundos));
+    }
+
     let (tx, rx) = mpsc::channel();
     tx.send(AppEvent::CaptureRequested(CaptureRequest {
         mode: options.mode,

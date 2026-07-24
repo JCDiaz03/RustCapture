@@ -45,10 +45,13 @@ pub(crate) const MENU_FULLSCREEN: u16 = 2001;
 pub(crate) const MENU_WINDOW: u16 = 2002;
 pub(crate) const MENU_TOGGLE: u16 = 2003;
 pub(crate) const MENU_QUIT: u16 = 2004;
+pub(crate) const MENU_REPEAT: u16 = 2005;
 
 struct BarState {
     tx: Sender<AppEvent>,
     destination: &'static str,
+    /// Retardo del botón Delay (f.17), de `[capture].delay_seconds`.
+    delay_ms: u64,
 }
 
 /// Handle de la barra. No expone tipos de `windows` (D2/D11).
@@ -58,14 +61,19 @@ pub struct Bar {
 
 impl Bar {
     /// Crea y muestra la barra. `destination` = sink por defecto de la
-    /// config ("clipboard"/"file").
-    pub fn create(tx: Sender<AppEvent>, destination: &'static str) -> Result<Self, String> {
-        Self::create_win32(tx, destination).map_err(|e| e.to_string())
+    /// config ("clipboard"/"file"); `delay_ms` = retardo del botón Delay.
+    pub fn create(
+        tx: Sender<AppEvent>,
+        destination: &'static str,
+        delay_ms: u64,
+    ) -> Result<Self, String> {
+        Self::create_win32(tx, destination, delay_ms).map_err(|e| e.to_string())
     }
 
     fn create_win32(
         tx: Sender<AppEvent>,
         destination: &'static str,
+        delay_ms: u64,
     ) -> windows::core::Result<Self> {
         // SAFETY: registro de clase + creación de ventana estándar; el
         // Box de estado viaja como lpCreateParams y lo adopta WM_NCCREATE.
@@ -81,7 +89,11 @@ impl Bar {
                 ..Default::default()
             };
             RegisterClassW(&wc); // 0 si ya estaba registrada: inofensivo
-            let state = Box::into_raw(Box::new(BarState { tx, destination }));
+            let state = Box::into_raw(Box::new(BarState {
+                tx,
+                destination,
+                delay_ms,
+            }));
             let width = 6 * BTN_W + 7 * MARGIN;
             let hwnd = CreateWindowExW(
                 WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
@@ -143,6 +155,24 @@ pub(crate) fn on_command(hwnd: HWND, id: u16) {
     match id {
         ID_FULLSCREEN | MENU_FULLSCREEN => enviar_captura(hwnd, ModeRequest::Fullscreen),
         ID_WINDOW | MENU_WINDOW => enviar_captura(hwnd, ModeRequest::ActiveWindow),
+        // f.17: captura del monitor activo tras el retardo configurado.
+        ID_DELAY => {
+            if let Some(state) = state_ref(hwnd) {
+                let _ = state.tx.send(AppEvent::DelayedCapture {
+                    request: CaptureRequest {
+                        mode: ModeRequest::Fullscreen,
+                        destination: state.destination,
+                    },
+                    delay_ms: state.delay_ms,
+                });
+            }
+        }
+        // f.18: repetir la última captura ejecutada con éxito.
+        MENU_REPEAT => {
+            if let Some(state) = state_ref(hwnd) {
+                let _ = state.tx.send(AppEvent::RepeatLast);
+            }
+        }
         MENU_TOGGLE => {
             // SAFETY: hwnd válido (viene del wndproc de esa ventana).
             unsafe {
@@ -199,7 +229,7 @@ fn crear_botones(hwnd: HWND) {
         (ID_FULLSCREEN, w!("Pantalla"), true),
         (ID_WINDOW, w!("Ventana"), true),
         (ID_REGION, w!("Región"), false),
-        (ID_DELAY, w!("Delay"), false),
+        (ID_DELAY, w!("Delay"), true),
         (ID_RECORD, w!("Grabar"), false),
         (ID_CONFIG, w!("Config"), false),
     ];

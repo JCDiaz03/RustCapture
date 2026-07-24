@@ -39,7 +39,7 @@ Objetivo: capturar y sacar por portapapeles/archivo desde barra, hotkey y CLI. P
 - ⏳ Objeto de ventana y menús (f.11, f.12).
 - ⏳ Región a mano alzada y región fija (f.14, f.15).
 - ⏳ Scroll capture (f.16) — el módulo de mayor riesgo técnico de la fase; referencia: implementación de ShareX.
-- ⏳ Retardo/temporizador y repetir última captura (f.17, f.18).
+- ✅ Retardo/temporizador y repetir última captura (f.17, f.18).
 - ⏳ Escritorios virtuales y capturas diminutas (f.7, f.19).
 
 ## 4. F3 — Editor y anotación (D5 + D6)
