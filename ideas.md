@@ -50,7 +50,7 @@ Desarrollo: IA-first (Opus 4.8 / Fable 5).
 24. Leyendas/captions con estilos de borde.
 25. Pixelado / desenfoque para censurar información.
 26. Recorte y redimensionado.
-27. Goma de borrar.
+27. Goma de borrar: elimina objetos de anotación completos (un Command deshacible), no píxeles.
 28. Nitidez y ajustes básicos de color.
 29. Marca de agua.
 30. Efectos de borde (sombra, borde rasgado).

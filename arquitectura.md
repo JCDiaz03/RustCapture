@@ -44,10 +44,11 @@ Todo el código Win32 vive en el crate `platform-win`, que implementa estos trai
       /output          (sinks, nombres automáticos, formatos)
       /tools           (lupa, regla, cuentagotas, pin)
       /config
-      ports.rs         (traits: ScreenSource, VideoEncoder, OutputSink, HotkeyProvider)
-  /platform-win        (adapters: GDI, WGC, DXGI, MF, WASAPI, hotkeys, WIA)
+      /orchestrator    (bus de eventos + consumidor, D7)
+      /ports           (traits: ScreenSource, VideoEncoder, OutputSink, HotkeyProvider; mocks públicos de test)
+  /platform-win        (adapters e interfaz Win32: GDI, portapapeles, hotkeys, barra, bandeja, overlay, editor, dibujo; futuros: WGC, DXGI, MF, WASAPI, WIA)
   /cli                 (binario fino)
-  /gui                 (binario fino: barra flotante, overlay, editor)
+  /gui                 (binario fino: cableado de barra + hilo orquestador)
 ```
 
 El paquete del directorio `/crates/core` se llama `rustcapture-core`: un paquete llamado `core` colisiona con el crate homónimo de la biblioteca estándar y rompe las macros de std que expanden rutas `::core`.
@@ -69,7 +70,7 @@ El paquete del directorio `/crates/core` se llama `rustcapture-core`: un paquete
 
 ## D7 — Eventos con canales (mpsc) para desacoplar entrada de acción
 
-**Hacemos:** hotkeys, clics de la barra y comandos CLI no llaman funciones: publican eventos (`CaptureRequested { mode, destination }`) en un canal mpsc que consume un orquestador en el core.
+**Hacemos:** hotkeys, clics de la barra y comandos CLI no llaman funciones: publican eventos (`CaptureRequested { mode, destination }`) en un canal mpsc que consume un orquestador en el core. El orquestador dispone además de un canal *loopback* (un `Sender` propio) para eventos programados: la captura con retardo lanza un hilo temporizador que reenvía el evento cuando toca — el bus nunca duerme.
 **Para conseguir:** que el hilo de UI nunca se bloquee (el hook de teclado de Windows penaliza callbacks lentos), y que grabar-mientras-anotas o el auto-capture por intervalo (fase 2) sean solo productores adicionales del mismo canal.
 
 ## D8 — Especificación de grabación de vídeo
@@ -103,6 +104,11 @@ El paquete del directorio `/crates/core` se llama `rustcapture-core`: un paquete
 **Hacemos:** la barra flotante (f.1), el icono de bandeja (f.2) y los hotkeys globales (f.3) se implementan con `windows-rs` directo (ventanas Win32 clásicas, `Shell_NotifyIcon`, `RegisterHotKey`) en `platform-win`; `gui` es un binario fino que cablea config + canal + hilo orquestador + bucle de mensajes. La UI del hilo principal solo produce eventos (D7); el orquestador vive en su propio hilo y se construye dentro de él, de modo que ningún trait object necesita `Send`. La barra es no-activate (no roba el foco) para que "capturar ventana activa" apunte a la ventana correcta.
 **Para conseguir:** peso y consumo mínimos — sin winit/egui/renderer para una barra de seis botones — y sin hipotecar la decisión de tecnología del editor (F3), que se tomará por separado.
 
+## D12 — El editor como destino por defecto y las ventanas modales del hilo de UI
+
+**Hacemos:** las capturas de la GUI desembocan por defecto en el editor (f.21) mediante un `OutputSink` más (`EditorSink`, id `"editor"`, default de `[output].destination`): su `deliver` corre en el hilo orquestador y solo publica el `Frame` al hilo de UI vía `PostMessageW` (Box crudo que el receptor siempre adopta). Todas las ventanas de trabajo (overlay de selección, editor, dibujo) siguen el mismo patrón: corren en el hilo de UI con bucle modal anidado, su estado lo posee la función llamadora (`Box::into_raw` antes de crear la ventana, `Box::from_raw` después de destruirla) y el wndproc lo usa sin liberarlo jamás. Un `AtomicBool` garantiza un editor cada vez (capturas con el editor abierto se rechazan con aviso); la barra se auto-oculta mientras el editor vive. El editor lleva flag de sucio: Draw con OK lo marca, Guardar/Copiar con éxito lo limpian, y cerrar sucio pide confirmación.
+**Para conseguir:** que el flujo capturar→editar→dibujar→salida no rompa D7 (el sink es un productor de mensajes, no bloquea el bus), que ningún trait object necesite `Send`, y un único patrón de ventana modal que cada pieza nueva reutiliza en vez de reinventar.
+
 ## Dependencias entre decisiones
 
-D1-D3 son el esqueleto previo a todo; D4 y D7 habilitan la captura; D5+D6 forman el bloque del editor; D10 depende de D5 maduro; D8 es independiente del editor y es el módulo de mayor tamaño. Fases y estado → ver `roadmap.md`.
+D1-D3 son el esqueleto previo a todo; D4 y D7 habilitan la captura; D5+D6 forman el bloque del editor y D12 lo cablea al flujo de captura; D10 depende de D5 maduro (su capa de selección ya existe; la de anotación reutilizará D5+D12); D11 y D12 comparten el patrón de ventana del hilo de UI; D8 es independiente del editor y es el módulo de mayor tamaño. Fases y estado → ver `roadmap.md`.

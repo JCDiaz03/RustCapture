@@ -10,7 +10,7 @@
 
 ## 0. Estado general
 
-🔵 **Fase actual: F3 — Editor y anotación (adelantada por decisión de producto).** F1 completada; F2 en pausa con el overlay de selección hecho (quedan picking de ventana/objeto, mano alzada, región fija, scroll y f.7/f.19).
+🔵 **Fase actual: F3 — Editor y anotación (adelantada por decisión de producto).** El ciclo capturar → editar → dibujar → guardar/copiar ya funciona (editor + ventana de dibujo operativos, D12); quedan las herramientas avanzadas, crop/resize, el formato re-editable y el resto de salidas. F1 completada; F2 en pausa (picking de ventana/objeto, mano alzada, región fija, scroll y f.7/f.19).
 
 ## 1. F0 — Diseño y preparación del entorno
 
@@ -43,7 +43,7 @@ Objetivo: capturar y sacar por portapapeles/archivo desde barra, hotkey y CLI. P
 - ✅ Retardo/temporizador y repetir última captura (f.17, f.18).
 - ⏳ Escritorios virtuales y capturas diminutas (f.7, f.19).
 
-## 4. F3 — Editor y anotación (D5 + D6)
+## 4. F3 — Editor y anotación (D5 + D6 + D12)
 
 - ✅ Slice A — Editor shell (f.21): captura → ventana de editor (Guardar como/Copiar/Draw/Cerrar), barra auto-oculta, destino "editor" por defecto.
 - ✅ Slice C — Ventana de dibujo (Ventana2): paleta sobre el motor de anotación, texto in situ, OK hornea y marca el editor como editado.
