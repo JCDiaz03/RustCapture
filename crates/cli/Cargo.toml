@@ -3,6 +3,11 @@ name = "cli"
 version.workspace = true
 edition.workspace = true
 
+[[bin]]
+name = "rustcapture"
+path = "src/main.rs"
+
 [dependencies]
 rustcapture-core.workspace = true
 platform-win.workspace = true
+pico-args = { workspace = true }
