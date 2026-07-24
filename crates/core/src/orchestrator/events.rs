@@ -2,15 +2,9 @@
 //! (hotkey, barra, CLI, auto-captura futura) publica estos valores en el
 //! canal mpsc que consume el orquestador.
 
-use crate::ports::{HotkeyId, Rect};
+use crate::ports::HotkeyId;
 
-/// Qué capturar. La mode factory lo convierte en una strategy `CaptureMode`.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum ModeRequest {
-    Fullscreen,
-    ActiveWindow,
-    Region(Rect),
-}
+pub use crate::capture::ModeRequest;
 
 /// `CaptureRequested { mode, destination }` de D7.
 #[derive(Clone, PartialEq, Eq, Debug)]
