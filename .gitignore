@@ -1,0 +1,14 @@
+# Cargo
+/target/
+**/*.rs.bk
+
+# Símbolos de depuración MSVC
+*.pdb
+
+# IDEs
+.idea/
+.vscode/
+
+# Windows
+Thumbs.db
+Desktop.ini

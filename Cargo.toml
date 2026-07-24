@@ -1,0 +1,16 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/core",
+    "crates/platform-win",
+    "crates/cli",
+    "crates/gui",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[workspace.dependencies]
+rustcapture-core = { path = "crates/core" }
+platform-win = { path = "crates/platform-win" }
