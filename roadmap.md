@@ -10,16 +10,15 @@
 
 ## 0. Estado general
 
-🔵 **Fase actual: F0 — Diseño y preparación.** Especificación y arquitectura definidas; sin código todavía.
+🔵 **Fase actual: F1 — MVP de captura.** F0 completada: especificación, arquitectura, skills y esqueleto del workspace listos.
 
 ## 1. F0 — Diseño y preparación del entorno
 
 - ✅ Comparativa de mercado y análisis de FastStone.
 - ✅ Catálogo de características (`ideas.md`).
 - ✅ Decisiones de arquitectura D1-D10 (`arquitectura.md`).
-- ⏳ Entorno: VS Code + rust-analyzer + Claude Code; toolchain Rust estable (MSVC).
-- ⏳ Instalar skills de flujo de trabajo del agente → selección y delegación en `skills.md`.
-- ⏳ Skill propia del proyecto (`windows-rs`, HRESULT, adapters) → definida en `skills.md`, se crea con el esqueleto.
+- ✅ Instalar skills de flujo de trabajo del agente → selección y delegación en `skills.md`.
+- ✅ Skill propia del proyecto (`windows-rs`, HRESULT, adapters) → definida en `skills.md`, se crea con el esqueleto.
 - ✅ Esqueleto del workspace (D1-D3): crates `core` (paquete `rustcapture-core`), `platform-win`, `cli`, `gui` compilando en vacío.
 
 ## 2. F1 — MVP de captura (D4 + D7)

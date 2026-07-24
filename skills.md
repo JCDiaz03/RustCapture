@@ -19,7 +19,7 @@ npx skills add obra/superpowers
 
 En el instalador, seleccionar únicamente: `brainstorming`, `writing-plans`, `executing-plans`, `test-driven-development`, `systematic-debugging`, `verification-before-completion`. Agente destino: Claude Code.
 
-Skill propia del proyecto `(pendiente de crear)`: convenciones `windows-rs`, patrones HRESULT, estructura de adapters de `platform-win` → se creará con `skill-creator` (anthropics/skills) cuando exista el esqueleto del workspace.
+Skill propia del proyecto: `windows-rs-interop` (convenciones `windows-rs`, patrones HRESULT, estructura de adapters de `platform-win`), en `.claude/skills/windows-rs-interop/`.
 
 ## Delegación: qué skill y cuándo
 
@@ -31,7 +31,7 @@ Skill propia del proyecto `(pendiente de crear)`: convenciones `windows-rs`, pat
 | Un test falla, un HRESULT devuelve error, un frame sale negro, comportamiento inexplicable | `systematic-debugging` | Prohibido "probar cosas al azar": hipótesis → experimento mínimo → confirmar/descartar. Prioritaria en el interop Win32 (D8, adapters). |
 | Antes de declarar terminada cualquier tarea o cerrar sesión | `verification-before-completion` | Compilar, correr tests, ejecutar el caso manual descrito en el plan. Sin verificación no hay "hecho" (ni ✅ en `roadmap.md`). |
 | Diseño de una feature nueva o duda de enfoque sin resolver en `arquitectura.md` | `brainstorming` | Explorar opciones con el humano ANTES de escribir plan alguno; el resultado se consolida en `arquitectura.md`, no en el chat. |
-| Código que toque Win32/COM/Media Foundation | Skill propia del proyecto `(pendiente de crear)` | Hasta que exista: usar `windows-rs` (nunca `winapi`), propagar errores con `windows::core::Result`, todo unsafe encapsulado en `platform-win`. |
+| Código que toque Win32/COM/Media Foundation | `windows-rs-interop` | Cargar la skill antes de escribir interop: `windows-rs` (nunca `winapi`), errores con `windows::core::Result`, todo unsafe encapsulado en `platform-win`. |
 
 ## Orden típico de una sesión
 
@@ -40,6 +40,11 @@ Skill propia del proyecto `(pendiente de crear)`: convenciones `windows-rs`, pat
 3. `executing-plans` + `test-driven-development`.
 4. `systematic-debugging` si algo se tuerce.
 5. `verification-before-completion` → solo entonces proponer actualizar `roadmap.md`.
+
+## Commits
+
+- Formato del mensaje: `vX.Y.Z — <nombre de lo hecho>` como asunto, seguido de una breve descripción de lo añadido. La numeración empieza en `v0.1.0`.
+- El agente solo puede hacer commit automático al dar por acabada una fase del `roadmap.md` (todos sus ítems ✅, pasada `verification-before-completion`). Cualquier otro commit debe pedirse al humano antes de ejecutarse.
 
 ## Descartadas
 
