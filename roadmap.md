@@ -27,7 +27,7 @@ Objetivo: capturar y sacar por portapapeles/archivo desde barra, hotkey y CLI. P
 
 - ✅ Puertos `ScreenSource`, `OutputSink`, `HotkeyProvider` + mocks de test (D2).
 - ⏳ Adapter de captura GDI/WGC en `platform-win` con DPI per-monitor (f.6).
-- ⏳ Bus de eventos mpsc + orquestador (D7).
+- ✅ Bus de eventos mpsc + orquestador (D7).
 - ⏳ Modos: pantalla completa, ventana activa, región rectangular (f.9, f.10, f.13) como strategies `CaptureMode` (D4).
 - ⏳ Salidas: portapapeles y archivo con nombres automáticos (f.40, f.41); PNG y JPEG.
 - ⏳ Barra flotante mínima + icono en bandeja + hotkeys globales (f.1-f.3).

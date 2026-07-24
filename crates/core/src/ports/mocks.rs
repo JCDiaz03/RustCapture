@@ -1,6 +1,8 @@
 //! Mocks de los puertos para tests de `core`, `cli` y `gui`.
 //! Públicos a propósito: son parte del contrato de test del workspace (D2).
 
+use std::sync::{Arc, Mutex};
+
 use super::{
     Frame, Hotkey, HotkeyError, HotkeyId, HotkeyProvider, OutputError, OutputSink, Rect,
     ScreenSource, ScreenSourceError,
@@ -76,10 +78,12 @@ impl ScreenSource for MockScreenSource {
     }
 }
 
-/// `OutputSink` que acumula lo entregado en memoria.
+/// `OutputSink` que acumula lo entregado en memoria. El log de entregas
+/// vive tras un `Arc<Mutex>` para poder inspeccionarlo aunque el sink se
+/// haya movido (p. ej. dentro del orquestador).
 pub struct MockOutputSink {
     id: &'static str,
-    delivered: Vec<Frame>,
+    delivered: Arc<Mutex<Vec<Frame>>>,
     next_error: Option<OutputError>,
 }
 
@@ -87,7 +91,7 @@ impl MockOutputSink {
     pub fn new(id: &'static str) -> Self {
         Self {
             id,
-            delivered: Vec::new(),
+            delivered: Arc::new(Mutex::new(Vec::new())),
             next_error: None,
         }
     }
@@ -97,9 +101,14 @@ impl MockOutputSink {
         self.next_error = Some(error);
     }
 
-    /// Frames entregados con éxito, en orden.
-    pub fn delivered(&self) -> &[Frame] {
-        &self.delivered
+    /// Copia de los frames entregados con éxito, en orden.
+    pub fn delivered(&self) -> Vec<Frame> {
+        self.delivered.lock().unwrap().clone()
+    }
+
+    /// Handle compartido al log de entregas.
+    pub fn delivered_handle(&self) -> Arc<Mutex<Vec<Frame>>> {
+        Arc::clone(&self.delivered)
     }
 }
 
@@ -112,7 +121,7 @@ impl OutputSink for MockOutputSink {
         if let Some(err) = self.next_error.take() {
             return Err(err);
         }
-        self.delivered.push(frame.clone());
+        self.delivered.lock().unwrap().push(frame.clone());
         Ok(())
     }
 }
@@ -231,6 +240,16 @@ mod tests {
         sink.deliver(&Frame::filled(1, 1, [1, 2, 3, 255])).unwrap();
         assert_eq!(sink.delivered().len(), 1);
         assert_eq!(sink.delivered()[0].pixel(0, 0), Some([1, 2, 3, 255]));
+    }
+
+    #[test]
+    fn delivered_handle_observa_entregas_tras_mover_el_sink() {
+        let sink = MockOutputSink::new("clipboard");
+        let handle = sink.delivered_handle();
+        let mut boxed: Box<dyn OutputSink> = Box::new(sink);
+        boxed.deliver(&Frame::filled(1, 1, [7, 7, 7, 255])).unwrap();
+        assert_eq!(handle.lock().unwrap().len(), 1);
+        assert_eq!(handle.lock().unwrap()[0].pixel(0, 0), Some([7, 7, 7, 255]));
     }
 
     #[test]

@@ -6,6 +6,7 @@
 pub mod annotate;
 pub mod capture;
 pub mod config;
+pub mod orchestrator;
 pub mod output;
 pub mod ports;
 pub mod record;
