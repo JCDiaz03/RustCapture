@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<style>
+body { margin: 0; background: #E8E8E6; font-family: "Segoe UI", "Segoe UI Variable", system-ui, sans-serif; color: #1A1A1A; }
+a { color: #0067C0; text-decoration: none; } a:hover { color: #004E92; text-decoration: underline; }
+</style>
+<script src="icons.js"></script>
+</helmet>
+<div style="padding: 32px 36px 64px; display: flex; flex-direction: column; gap: 40px; min-width: 1840px;">
+  <div style="display: flex; align-items: baseline; gap: 14px;">
+    <img src="icons/app/app-icon.svg" alt="RustCapture" style="width: 28px; height: 28px; align-self: center;">
+    <div style="font-size: 20px; font-weight: 600;">RustCapture — Superficies clave</div>
+    <div style="font-size: 12px; color: #6B6B6B;">V1 barra flotante · V3 overlay de selección · V4 editor · iconos · tokens — tema claro y oscuro</div>
+  </div>
+
+  <section id="v1" data-screen-label="V1 Barra flotante" style="display: flex; flex-direction: column; gap: 14px;">
+    <div style="font-family: Consolas, monospace; font-size: 11px; letter-spacing: 1px; color: #8A8A8A;">V1 — BARRA FLOTANTE · horizontal / vertical / colapsada</div>
+    <div style="display: flex; gap: 36px; align-items: flex-start;">
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <div style="position: relative; padding-bottom: 34px;">
+          <div style="display: inline-flex; align-items: center; gap: 2px; padding: 4px; background: #F3F3F3; border: 1px solid #D0D0D0; border-radius: 4px; box-shadow: 0 1px 2px rgba(0,0,0,0.12);">
+            <sc-for list="{{ barL }}" as="it" hint-placeholder-count="18"><div style="{{ it.st }}">{{ it.el }}</div></sc-for>
+          </div>
+          <div style="position: absolute; left: 106px; top: 40px; background: #F3F3F3; border: 1px solid #D0D0D0; border-radius: 4px; padding: 3px 8px; font-size: 11px; color: #1A1A1A; box-shadow: 0 1px 3px rgba(0,0,0,0.15); white-space: nowrap;">Región <span style="color: #6B6B6B;">(Ctrl+PrtScn)</span></div>
+        </div>
+        <div style="display: inline-flex; align-items: center; gap: 2px; padding: 4px; background: #202020; border: 1px solid #3F3F3F; border-radius: 4px; align-self: flex-start; box-shadow: 0 1px 2px rgba(0,0,0,0.3);">
+          <sc-for list="{{ barD }}" as="it" hint-placeholder-count="18"><div style="{{ it.st }}">{{ it.el }}</div></sc-for>
+        </div>
+        <div style="display: flex; gap: 16px; align-items: flex-start;">
+          <div style="display: inline-flex; align-items: center; gap: 6px;">
+            <div style="display: inline-flex; align-items: center; gap: 2px; padding: 4px; background: #F3F3F3; border: 1px solid #D0D0D0; border-radius: 4px;">
+              <sc-for list="{{ colL }}" as="it" hint-placeholder-count="2"><div style="{{ it.st }}">{{ it.el }}</div></sc-for>
+            </div>
+            <div style="display: inline-flex; align-items: center; gap: 2px; padding: 4px; background: #202020; border: 1px solid #3F3F3F; border-radius: 4px;">
+              <sc-for list="{{ colD }}" as="it" hint-placeholder-count="2"><div style="{{ it.st }}">{{ it.el }}</div></sc-for>
+            </div>
+            <div style="font-size: 11px; color: #8A8A8A; margin-left: 4px;">colapsada</div>
+          </div>
+          <div style="display: inline-flex; align-items: flex-end; gap: 6px; margin-left: 24px;">
+            <div style="width: 14px; height: 90px; background: #F3F3F3; border: 1px solid #D0D0D0; border-radius: 4px 0 0 4px; border-right: none; display: flex; align-items: center; justify-content: center; color: #8A8A8A;">{{ dockNub }}</div>
+            <div style="font-size: 11px; color: #8A8A8A; max-width: 150px;">acoplada al borde: auto-ocultada, asoma 4 px lógicos</div>
+          </div>
+        </div>
+      </div>
+      <div style="display: flex; gap: 12px; align-items: flex-start;">
+        <div style="display: inline-flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px; background: #F3F3F3; border: 1px solid #D0D0D0; border-radius: 4px; box-shadow: 0 1px 2px rgba(0,0,0,0.12);">
+          <sc-for list="{{ barVL }}" as="it" hint-placeholder-count="18"><div style="{{ it.st }}">{{ it.el }}</div></sc-for>
+        </div>
+        <div style="display: inline-flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px; background: #202020; border: 1px solid #3F3F3F; border-radius: 4px; box-shadow: 0 1px 2px rgba(0,0,0,0.3);">
+          <sc-for list="{{ barVD }}" as="it" hint-placeholder-count="18"><div style="{{ it.st }}">{{ it.el }}</div></sc-for>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="v3" data-screen-label="V3 Overlay de selección" style="display: flex; flex-direction: column; gap: 14px;">
+    <div style="font-family: Consolas, monospace; font-size: 11px; letter-spacing: 1px; color: #8A8A8A;">V3 — OVERLAY DE SELECCIÓN Y ANOTACIÓN · frame congelado, lupa, toolbar contextual</div>
+    <div style="display: flex; gap: 24px; align-items: flex-start;">
+      <div style="position: relative; width: 960px; height: 540px; overflow: hidden; border: 1px solid #B8B8B8; background: #46698C; flex-shrink: 0;">
+        <div style="position: absolute; left: 90px; top: 60px; width: 520px; height: 360px; background: #FFFFFF; border: 1px solid #9AA7B2;">
+          <div style="height: 30px; background: #F3F3F3; border-bottom: 1px solid #D8D8D8; display: flex; align-items: center; padding: 0 10px; font-size: 11px; color: #5A5A5A;">Documento — Explorador de archivos</div>
+          <div style="padding: 14px; display: flex; flex-direction: column; gap: 8px;">
+            <div style="height: 10px; width: 70%; background: #E2E2E2; border-radius: 2px;"></div>
+            <div style="height: 10px; width: 55%; background: #E2E2E2; border-radius: 2px;"></div>
+            <div style="height: 64px; width: 90%; background: #EDF2F6; border: 1px solid #D8E0E8; border-radius: 2px;"></div>
+            <div style="height: 10px; width: 62%; background: #E2E2E2; border-radius: 2px;"></div>
+          </div>
+        </div>
+        <div style="position: absolute; left: 0; right: 0; bottom: 0; height: 34px; background: #17222D;"></div>
+        <div style="position: absolute; left: 0; top: 0; right: 0; height: 150px; background: rgba(0,0,0,0.32);"></div>
+        <div style="position: absolute; left: 0; top: 490px; right: 0; bottom: 0; background: rgba(0,0,0,0.32);"></div>
+        <div style="position: absolute; left: 0; top: 150px; width: 250px; height: 340px; background: rgba(0,0,0,0.32);"></div>
+        <div style="position: absolute; left: 610px; top: 150px; right: 0; height: 340px; background: rgba(0,0,0,0.32);"></div>
+        <div style="position: absolute; left: 250px; top: 150px; width: 360px; height: 340px; border: 1px solid #0067C0; box-sizing: border-box;"></div>
+        <div style="position: absolute; left: 609px; top: 0; bottom: 0; width: 1px; background: rgba(0,103,192,0.75);"></div>
+        <div style="position: absolute; left: 0; right: 0; top: 489px; height: 1px; background: rgba(0,103,192,0.75);"></div>
+        <div style="position: absolute; left: 250px; top: 128px; background: #0067C0; color: #FFFFFF; font-size: 11px; padding: 2px 7px; border-radius: 2px;">360 × 340 px</div>
+        <div style="position: absolute; left: 626px; top: 300px; width: 128px; background: #F3F3F3; border: 1px solid #D0D0D0; border-radius: 4px; overflow: hidden; box-shadow: 0 2px 6px rgba(0,0,0,0.3);">
+          <div style="display: grid; grid-template-columns: repeat(7, 18px); border-bottom: 1px solid #D0D0D0;">
+            <sc-for list="{{ lupaPx }}" as="px" hint-placeholder-count="49"><div style="{{ px.st }}"></div></sc-for>
+          </div>
+          <div style="padding: 4px 7px; font-family: Consolas, monospace; font-size: 10px; color: #1A1A1A; line-height: 1.5;">#4A7DAB · 610, 490<br>sel 360 × 340</div>
+        </div>
+        <div style="position: absolute; left: 320px; top: 504px; display: flex; align-items: center; gap: 2px; padding: 4px; background: #F3F3F3; border: 1px solid #D0D0D0; border-radius: 4px; box-shadow: 0 2px 6px rgba(0,0,0,0.35);">
+          <sc-for list="{{ ovlL }}" as="it" hint-placeholder-count="15"><div style="{{ it.st }}">{{ it.el }}</div></sc-for>
+        </div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 12px; max-width: 420px;">
+        <div style="font-size: 11px; color: #8A8A8A;">toolbar contextual — tema oscuro</div>
+        <div style="display: inline-flex; align-items: center; gap: 2px; padding: 4px; background: #2B2B2B; border: 1px solid #3F3F3F; border-radius: 4px; align-self: flex-start;">
+          <sc-for list="{{ ovlD }}" as="it" hint-placeholder-count="15"><div style="{{ it.st }}">{{ it.el }}</div></sc-for>
+        </div>
+        <div style="font-size: 12px; color: #5A5A5A; line-height: 1.55;">Fuera de la selección el frame se oscurece un 32 %. El crosshair proyecta guías a los bordes; la lupa (6×) marca el píxel central y muestra coordenadas y tamaño. <b>Enter</b> ejecuta la salida por defecto (copiar) · <b>Esc</b> cancela.</div>
+      </div>
+    </div>
+  </section>
+
+  <section id="v4" data-screen-label="V4 Editor" style="display: flex; flex-direction: column; gap: 14px;">
+    <div style="font-family: Consolas, monospace; font-size: 11px; letter-spacing: 1px; color: #8A8A8A;">V4 — EDITOR · herramienta activa: {{ toolLabel }} (cámbiala en Tweaks)</div>
+    <div style="display: flex; gap: 24px; align-items: flex-start;">
+
+      <div style="width: 860px; background: #F3F3F3; border: 1px solid #B8B8B8; border-radius: 4px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.18); flex-shrink: 0;">
+        <div style="height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 4px 0 10px; border-bottom: 1px solid #D0D0D0;">
+          <img src="icons/app/app-icon.svg" style="width: 16px; height: 16px;">
+          <div style="font-size: 12px; flex: 1;">captura_2026-07-26_09.41.12.png — RustCapture</div>
+          <div style="display: flex;">
+            <div style="width: 40px; height: 30px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #5A5A5A;">–</div>
+            <div style="width: 40px; height: 30px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #5A5A5A;">▢</div>
+            <div style="width: 40px; height: 30px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #5A5A5A;" style-hover="background: #C42B1C; color: #FFFFFF;">✕</div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 2px; padding: 4px 8px; border-bottom: 1px solid #D0D0D0;">
+          <sc-for list="{{ edToolsL }}" as="it" hint-placeholder-count="16"><div style="{{ it.st }}">{{ it.el }}</div></sc-for>
+          <div style="flex: 1;"></div>
+          <sc-for list="{{ edOutL }}" as="it" hint-placeholder-count="5"><div style="{{ it.st }}">{{ it.el }}</div></sc-for>
+        </div>
+        <div style="display: flex; align-items: center; gap: 14px; padding: 4px 12px; height: 26px; background: #FFFFFF; border-bottom: 1px solid #D0D0D0;">
+          <sc-for list="{{ chipsL }}" as="ch" hint-placeholder-count="3">
+            <div style="{{ ch.st }}"><span>{{ ch.k }}</span><sc-if value="{{ ch.sw }}" hint-placeholder-val="{{ false }}"><span style="{{ ch.sw }}"></span></sc-if><span style="{{ ch.vst }}">{{ ch.v }}</span></div>
+          </sc-for>
+        </div>
+        <div style="position: relative; height: 400px; background: #DADADA; display: flex; align-items: center; justify-content: center;">
+          <div style="position: relative; width: 560px; height: 330px; background: #FFFFFF; border: 1px solid #B0B0B0; box-shadow: 0 1px 4px rgba(0,0,0,0.2);">
+            <div style="height: 28px; background: #F3F3F3; border-bottom: 1px solid #D8D8D8; display: flex; align-items: center; padding: 0 10px; font-size: 11px; color: #5A5A5A;">Ajustes de red</div>
+            <div style="padding: 16px; display: flex; flex-direction: column; gap: 10px;">
+              <div style="height: 9px; width: 60%; background: #E4E4E4; border-radius: 2px;"></div>
+              <div style="height: 9px; width: 45%; background: #E4E4E4; border-radius: 2px;"></div>
+              <div style="height: 26px; width: 240px; background: #FFFFFF; border: 1px solid #C8C8C8; border-radius: 2px;"></div>
+              <div style="display: flex; gap: 8px; margin-top: 10px;">
+                <div style="height: 26px; width: 92px; background: #0067C0; border-radius: 2px; display: flex; align-items: center; justify-content: center; color: #FFF; font-size: 11px;">Aceptar</div>
+                <div style="height: 26px; width: 92px; background: #F3F3F3; border: 1px solid #C8C8C8; border-radius: 2px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #5A5A5A;">Cancelar</div>
+              </div>
+            </div>
+            <svg viewBox="0 0 560 330" style="position: absolute; inset: 0; width: 100%; height: 100%;" fill="none" stroke="#D83B01" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M420 110L160 218"></path><path d="M186 214l-26 4 14-24"></path></svg>
+            <div style="position: absolute; left: 140px; top: 92px; width: 300px; height: 144px; border: 1px dashed #0067C0;"></div>
+            <div style="position: absolute; left: 136px; top: 88px; width: 7px; height: 7px; background: #FFF; border: 1px solid #0067C0;"></div>
+            <div style="position: absolute; left: 436px; top: 88px; width: 7px; height: 7px; background: #FFF; border: 1px solid #0067C0;"></div>
+            <div style="position: absolute; left: 136px; top: 232px; width: 7px; height: 7px; background: #FFF; border: 1px solid #0067C0;"></div>
+            <div style="position: absolute; left: 436px; top: 232px; width: 7px; height: 7px; background: #FFF; border: 1px solid #0067C0;"></div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: flex-end; gap: 2px; padding: 4px 8px 0; background: #EAEAEA; border-top: 1px solid #D0D0D0;">
+          <div style="display: flex; align-items: center; gap: 6px; padding: 4px 10px; background: #F3F3F3; border: 1px solid #D0D0D0; border-bottom: none; border-radius: 4px 4px 0 0; font-size: 11px;"><div style="width: 18px; height: 12px; background: #46698C; border: 1px solid #B0B0B0;"></div>captura_09.41.12</div>
+          <div style="display: flex; align-items: center; gap: 6px; padding: 4px 10px; font-size: 11px; color: #6B6B6B;"><div style="width: 18px; height: 12px; background: #8C6E46; border: 1px solid #B0B0B0;"></div>captura_09.38.55</div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 16px; padding: 0 12px; height: 24px; background: #F3F3F3; border-top: 1px solid #D0D0D0; font-size: 11px; color: #5A5A5A;">
+          <span>1280 × 800 px</span><span>100 %</span><span>PNG · 412 KB</span><div style="flex: 1;"></div><span>Ctrl+rueda: zoom</span>
+        </div>
+      </div>
+
+      <div style="width: 860px; background: #202020; border: 1px solid #000; border-radius: 4px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.4); flex-shrink: 0;">
+        <div style="height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 4px 0 10px; border-bottom: 1px solid #3F3F3F; color: #E8E8E8;">
+          <img src="icons/app/app-icon.svg" style="width: 16px; height: 16px;">
+          <div style="font-size: 12px; flex: 1;">captura_2026-07-26_09.41.12.png — RustCapture</div>
+          <div style="display: flex;">
+            <div style="width: 40px; height: 30px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: #9A9A9A;">–</div>
+            <div style="width: 40px; height: 30px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #9A9A9A;">▢</div>
+            <div style="width: 40px; height: 30px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #9A9A9A;">✕</div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 2px; padding: 4px 8px; border-bottom: 1px solid #3F3F3F;">
+          <sc-for list="{{ edToolsD }}" as="it" hint-placeholder-count="16"><div style="{{ it.st }}">{{ it.el }}</div></sc-for>
+          <div style="flex: 1;"></div>
+          <sc-for list="{{ edOutD }}" as="it" hint-placeholder-count="5"><div style="{{ it.st }}">{{ it.el }}</div></sc-for>
+        </div>
+        <div style="display: flex; align-items: center; gap: 14px; padding: 4px 12px; height: 26px; background: #2B2B2B; border-bottom: 1px solid #3F3F3F;">
+          <sc-for list="{{ chipsD }}" as="ch" hint-placeholder-count="3">
+            <div style="{{ ch.st }}"><span>{{ ch.k }}</span><sc-if value="{{ ch.sw }}" hint-placeholder-val="{{ false }}"><span style="{{ ch.sw }}"></span></sc-if><span style="{{ ch.vst }}">{{ ch.v }}</span></div>
+          </sc-for>
+        </div>
+        <div style="position: relative; height: 400px; background: #191919; display: flex; align-items: center; justify-content: center;">
+          <div style="position: relative; width: 560px; height: 330px; background: #FFFFFF; border: 1px solid #000; box-shadow: 0 1px 4px rgba(0,0,0,0.5);">
+            <div style="height: 28px; background: #F3F3F3; border-bottom: 1px solid #D8D8D8; display: flex; align-items: center; padding: 0 10px; font-size: 11px; color: #5A5A5A;">Ajustes de red</div>
+            <div style="padding: 16px; display: flex; flex-direction: column; gap: 10px;">
+              <div style="height: 9px; width: 60%; background: #E4E4E4; border-radius: 2px;"></div>
+              <div style="height: 9px; width: 45%; background: #E4E4E4; border-radius: 2px;"></div>
+              <div style="height: 26px; width: 240px; background: #FFFFFF; border: 1px solid #C8C8C8; border-radius: 2px;"></div>
+              <div style="display: flex; gap: 8px; margin-top: 10px;">
+                <div style="height: 26px; width: 92px; background: #0067C0; border-radius: 2px; display: flex; align-items: center; justify-content: center; color: #FFF; font-size: 11px;">Aceptar</div>
+                <div style="height: 26px; width: 92px; background: #F3F3F3; border: 1px solid #C8C8C8; border-radius: 2px; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #5A5A5A;">Cancelar</div>
+              </div>
+            </div>
+            <svg viewBox="0 0 560 330" style="position: absolute; inset: 0; width: 100%; height: 100%;" fill="none" stroke="#D83B01" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M420 110L160 218"></path><path d="M186 214l-26 4 14-24"></path></svg>
+            <div style="position: absolute; left: 140px; top: 92px; width: 300px; height: 144px; border: 1px dashed #0067C0;"></div>
+            <div style="position: absolute; left: 136px; top: 88px; width: 7px; height: 7px; background: #2B2B2B; border: 1px solid #0067C0;"></div>
+            <div style="position: absolute; left: 436px; top: 88px; width: 7px; height: 7px; background: #2B2B2B; border: 1px solid #0067C0;"></div>
+            <div style="position: absolute; left: 136px; top: 232px; width: 7px; height: 7px; background: #2B2B2B; border: 1px solid #0067C0;"></div>
+            <div style="position: absolute; left: 436px; top: 232px; width: 7px; height: 7px; background: #2B2B2B; border: 1px solid #0067C0;"></div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: flex-end; gap: 2px; padding: 4px 8px 0; background: #1B1B1B; border-top: 1px solid #3F3F3F;">
+          <div style="display: flex; align-items: center; gap: 6px; padding: 4px 10px; background: #2B2B2B; border: 1px solid #3F3F3F; border-bottom: none; border-radius: 4px 4px 0 0; font-size: 11px; color: #E8E8E8;"><div style="width: 18px; height: 12px; background: #46698C; border: 1px solid #000;"></div>captura_09.41.12</div>
+          <div style="display: flex; align-items: center; gap: 6px; padding: 4px 10px; font-size: 11px; color: #9A9A9A;"><div style="width: 18px; height: 12px; background: #8C6E46; border: 1px solid #000;"></div>captura_09.38.55</div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 16px; padding: 0 12px; height: 24px; background: #202020; border-top: 1px solid #3F3F3F; font-size: 11px; color: #9A9A9A;">
+          <span>1280 × 800 px</span><span>100 %</span><span>PNG · 412 KB</span><div style="flex: 1;"></div><span>Ctrl+rueda: zoom</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="appicon" data-screen-label="Icono de aplicación" style="display: flex; flex-direction: column; gap: 14px;">
+    <div style="font-family: Consolas, monospace; font-size: 11px; letter-spacing: 1px; color: #8A8A8A;">ICONO DE APLICACIÓN · marco de captura + destello — 16/24/32/48/256 px + variante bandeja</div>
+    <div style="display: flex; gap: 28px; align-items: flex-end;">
+      <img src="icons/app/app-icon.svg" style="width: 96px; height: 96px;">
+      <img src="icons/app/app-icon.svg" style="width: 48px; height: 48px;">
+      <img src="icons/app/app-icon.svg" style="width: 32px; height: 32px;">
+      <img src="icons/app/app-icon.svg" style="width: 24px; height: 24px;">
+      <img src="icons/app/app-icon.svg" style="width: 16px; height: 16px;">
+      <div style="display: flex; gap: 10px; margin-left: 24px;">
+        <div style="width: 40px; height: 40px; background: #F3F3F3; border: 1px solid #D0D0D0; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #1A1A1A;">{{ trayIcon }}</div>
+        <div style="width: 40px; height: 40px; background: #202020; border: 1px solid #3F3F3F; border-radius: 4px; display: flex; align-items: center; justify-content: center; color: #E8E8E8;">{{ trayIcon2 }}</div>
+      </div>
+      <div style="font-size: 11px; color: #8A8A8A; padding-bottom: 4px;">bandeja (currentColor, claro / oscuro)</div>
+    </div>
+  </section>
+
+  <section id="iconos" data-screen-label="Set de iconos" style="display: flex; flex-direction: column; gap: 14px;">
+    <div style="font-family: Consolas, monospace; font-size: 11px; letter-spacing: 1px; color: #8A8A8A;">SET DE ICONOS · 49 SVG currentColor · rejilla 16 px · trazo 1.5 — archivos en /icons</div>
+    <div style="display: flex; gap: 20px; align-items: flex-start;">
+      <div style="display: grid; grid-template-columns: repeat(10, 88px); gap: 2px; padding: 14px; background: #F3F3F3; border: 1px solid #D0D0D0; border-radius: 4px; color: #1A1A1A;">
+        <sc-for list="{{ iconGrid }}" as="ic" hint-placeholder-count="49">
+          <div style="display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 8px 2px;">{{ ic.el }}<div style="font-family: Consolas, monospace; font-size: 9px; color: #8A8A8A; text-align: center; word-break: break-all;">{{ ic.n }}</div></div>
+        </sc-for>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(5, 40px); gap: 2px; padding: 14px; background: #202020; border: 1px solid #3F3F3F; border-radius: 4px; color: #E8E8E8;">
+        <sc-for list="{{ iconGridD }}" as="ic" hint-placeholder-count="25">
+          <div style="display: flex; align-items: center; justify-content: center; height: 32px;">{{ ic.el }}</div>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+
+  <section id="tokens" data-screen-label="Tokens" style="display: flex; flex-direction: column; gap: 14px;">
+    <div style="font-family: Consolas, monospace; font-size: 11px; letter-spacing: 1px; color: #8A8A8A;">TOKENS · referencia única §2</div>
+    <div style="display: flex; gap: 24px; align-items: flex-start;">
+      <div style="display: flex; gap: 8px;">
+        <sc-for list="{{ tokenColors }}" as="tk" hint-placeholder-count="10">
+          <div style="display: flex; flex-direction: column; gap: 5px; width: 84px;">
+            <div style="{{ tk.st }}"></div>
+            <div style="font-family: Consolas, monospace; font-size: 10px; color: #1A1A1A;">{{ tk.hex }}</div>
+            <div style="font-size: 10px; color: #8A8A8A; line-height: 1.3;">{{ tk.n }}</div>
+          </div>
+        </sc-for>
+      </div>
+      <div style="border-left: 1px solid #D0D0D0; padding-left: 24px; display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: #1A1A1A;">
+        <div style="font-size: 13px;">Segoe UI 13 px — cuerpo</div>
+        <div style="font-size: 12px;">Segoe UI 12 px — denso / chips</div>
+        <div style="font-size: 11px; color: #5A5A5A;">Segoe UI 11 px — secundario / status</div>
+        <div style="font-family: Consolas, monospace; font-size: 11px; color: #5A5A5A; margin-top: 8px;">radio 4 px · borde 1 px · espaciado 4n · botón 28×28 · icono 16 · trazo 1.5</div>
+      </div>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;herramientaActiva&quot;: {&quot;editor&quot;: &quot;enum&quot;, &quot;options&quot;: [&quot;flecha&quot;, &quot;texto&quot;, &quot;pasos&quot;, &quot;pixelado&quot;], &quot;default&quot;: &quot;flecha&quot;, &quot;section&quot;: &quot;Editor V4&quot;, &quot;tsType&quot;: &quot;string&quot;}, &quot;grabando&quot;: {&quot;editor&quot;: &quot;boolean&quot;, &quot;default&quot;: false, &quot;section&quot;: &quot;Barra V1&quot;, &quot;tsType&quot;: &quot;boolean&quot;}}">
+class Component extends DCLogic {
+  componentDidMount() {
+    if (!window.RC_ICONS) {
+      this._t = setInterval(() => { if (window.RC_ICONS) { clearInterval(this._t); this.forceUpdate(); } }, 80);
+    }
+  }
+  componentWillUnmount() { if (this._t) clearInterval(this._t); }
+  ic(name, size, key) {
+    const m = (window.RC_ICONS || {})[name];
+    if (!m) return null;
+    return React.createElement('svg', { key: key || name, viewBox: '0 0 16 16', width: size || 16, height: size || 16, fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round', style: { display: 'block', flexShrink: 0 }, dangerouslySetInnerHTML: { __html: m } });
+  }
+  renderVals() {
+    const tool = this.props.herramientaActiva ?? 'flecha';
+    const rec = this.props.grabando ?? false;
+    const L = { txt: '#1A1A1A', sub: '#5A5A5A', border: '#D0D0D0', hover: '#E4E4E4' };
+    const D = { txt: '#E8E8E8', sub: '#9A9A9A', border: '#4A4A4A', hover: '#3A3A3A' };
+    const btn = (t, extra) => Object.assign({ width: 28, height: 28, borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', color: t.txt, flexShrink: 0 }, extra);
+    const mk = (t, name, extra) => ({ el: this.ic(name), st: btn(t, extra) });
+    const sepV = t => ({ el: null, st: { width: 1, height: 20, background: t.border, margin: '0 3px', flexShrink: 0 } });
+    const sepH = t => ({ el: null, st: { height: 1, width: 20, background: t.border, margin: '3px 0', flexShrink: 0 } });
+
+    const barItems = (t, vertical) => {
+      const sep = () => vertical ? sepH(t) : sepV(t);
+      const out = [{ el: this.ic('sys-drag-handle'), st: btn(t, { width: vertical ? 28 : 16, height: vertical ? 16 : 28, color: t.sub, cursor: 'grab' }) }];
+      ['capture-fullscreen', 'capture-window', 'capture-object'].forEach(n => out.push(mk(t, n)));
+      out.push(mk(t, 'capture-region', vertical ? {} : { background: t.hover, outline: '1px solid ' + t.border }));
+      ['capture-freehand', 'capture-fixed', 'capture-scroll'].forEach(n => out.push(mk(t, n)));
+      out.push(sep());
+      out.push(mk(t, 'record-start', rec ? { color: '#FFFFFF', background: '#D83B01' } : { color: '#D83B01' }));
+      out.push(sep());
+      ['util-eyedropper', 'util-magnifier', 'util-ruler', 'util-crosshair', 'util-pin'].forEach(n => out.push(mk(t, n)));
+      out.push(sep());
+      out.push(mk(t, 'sys-settings'));
+      out.push(mk(t, vertical ? 'sys-expand' : 'sys-collapse', { color: t.sub }));
+      return out;
+    };
+    const collapsed = t => [
+      { el: this.ic('sys-drag-handle'), st: btn(t, { width: 16, color: t.sub, cursor: 'grab' }) },
+      mk(t, 'sys-expand', { color: t.sub })
+    ];
+    const ovl = t => {
+      const out = ['annotate-text', 'annotate-arrow', 'annotate-line', 'annotate-shape', 'annotate-highlight', 'annotate-steps', 'annotate-caption', 'annotate-pixelate', 'annotate-eraser'].map(n => mk(t, n));
+      out.push(sepV(t));
+      out.push(mk(t, 'output-copy', { background: '#0067C0', color: '#FFFFFF' }));
+      out.push(mk(t, 'output-save'));
+      out.push(mk(t, 'output-external-editor'));
+      out.push(sepV(t));
+      out.push(mk(t, 'sys-close', { color: t.sub }));
+      return out;
+    };
+    const toolIcon = { flecha: 'annotate-arrow', texto: 'annotate-text', pasos: 'annotate-steps', pixelado: 'annotate-pixelate' };
+    const edTools = t => {
+      const out = [];
+      ['annotate-select', 'annotate-text', 'annotate-arrow', 'annotate-line', 'annotate-shape', 'annotate-highlight', 'annotate-steps', 'annotate-caption', 'annotate-pixelate', 'annotate-eraser'].forEach(n => {
+        out.push(mk(t, n, n === toolIcon[tool] ? { background: '#0067C0', color: '#FFFFFF' } : {}));
+      });
+      out.push(sepV(t));
+      out.push(mk(t, 'annotate-crop'));
+      out.push(mk(t, 'edit-resize'));
+      out.push(sepV(t));
+      out.push(mk(t, 'edit-undo'));
+      out.push(mk(t, 'edit-redo', { color: t.sub }));
+      return out;
+    };
+    const edOut = t => ['output-copy', 'output-save', 'output-save-as', 'output-print', 'output-email'].map(n => mk(t, n));
+
+    const chipDefs = {
+      flecha: [{ k: 'Grosor', v: '2 px' }, { k: 'Color', v: '', c: '#D83B01' }, { k: 'Punta', v: 'Sólida' }],
+      texto: [{ k: 'Fuente', v: 'Segoe UI' }, { k: 'Tamaño', v: '14 px' }, { k: 'Color', v: '', c: '#D83B01' }, { k: 'Estilo', v: 'B / I' }],
+      pasos: [{ k: 'Tamaño', v: '24 px' }, { k: 'Color', v: '', c: '#D83B01' }, { k: 'Siguiente', v: '4' }],
+      pixelado: [{ k: 'Bloque', v: '8 px' }, { k: 'Intensidad', v: 'Media' }]
+    };
+    const chips = t => chipDefs[tool].map(c => ({
+      k: c.k, v: c.v,
+      st: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: t.sub },
+      vst: { color: t.txt, fontWeight: 600 },
+      sw: c.c ? { width: 14, height: 14, borderRadius: 3, background: c.c, border: '1px solid rgba(128,128,128,0.5)', display: 'inline-block' } : null
+    }));
+    const labels = { flecha: 'Flecha', texto: 'Texto', pasos: 'Pasos numerados', pixelado: 'Pixelado' };
+
+    const base = ['#4A7DAB', '#4F82B0', '#4677A5', '#527FAC', '#4A7DAB', '#456F9A', '#4A7DAB'];
+    const lupaPx = [];
+    for (let r = 0; r < 7; r++) for (let c = 0; c < 7; c++) {
+      const center = r === 3 && c === 3;
+      lupaPx.push({ st: { width: 18, height: 16, background: base[(r * 3 + c * 5) % 7], boxSizing: 'border-box', border: center ? '2px solid #D83B01' : '0.5px solid rgba(255,255,255,0.12)' } });
+    }
+
+    const names = Object.keys(window.RC_ICONS || {}).filter(n => n !== 'app-tray');
+    const iconGrid = names.map(n => ({ n: n + '.svg', el: this.ic(n, 16, 'g' + n) }));
+    const iconGridD = names.slice(0, 25).map(n => ({ el: this.ic(n, 16, 'd' + n) }));
+
+    const sw = (bg, border) => ({ height: 40, borderRadius: 4, background: bg, border: '1px solid ' + (border || '#D0D0D0') });
+    const tokenColors = [
+      { hex: '#F3F3F3', n: 'fondo claro', st: sw('#F3F3F3') }, { hex: '#FFFFFF', n: 'panel claro', st: sw('#FFFFFF') },
+      { hex: '#1A1A1A', n: 'texto claro', st: sw('#1A1A1A') }, { hex: '#D0D0D0', n: 'borde claro', st: sw('#D0D0D0') },
+      { hex: '#202020', n: 'fondo oscuro', st: sw('#202020', '#000') }, { hex: '#2B2B2B', n: 'panel oscuro', st: sw('#2B2B2B', '#000') },
+      { hex: '#E8E8E8', n: 'texto oscuro', st: sw('#E8E8E8') }, { hex: '#3F3F3F', n: 'borde oscuro', st: sw('#3F3F3F', '#000') },
+      { hex: '#0067C0', n: 'acento selección / acción', st: sw('#0067C0') }, { hex: '#D83B01', n: 'acento grabación', st: sw('#D83B01') }
+    ];
+
+    return {
+      barL: barItems(L, false), barD: barItems(D, false),
+      barVL: barItems(L, true), barVD: barItems(D, true),
+      colL: collapsed(L), colD: collapsed(D),
+      dockNub: this.ic('sys-collapse', 12, 'nub'),
+      ovlL: ovl(L), ovlD: ovl(D),
+      edToolsL: edTools(L), edToolsD: edTools(D),
+      edOutL: edOut(L), edOutD: edOut(D),
+      chipsL: chips(L), chipsD: chips(D),
+      toolLabel: labels[tool], lupaPx, iconGrid, iconGridD, tokenColors,
+      trayIcon: this.ic('app-tray', 20, 'tray1'), trayIcon2: this.ic('app-tray', 20, 'tray2')
+    };
+  }
+}
+</script>
+</body>
+</html>

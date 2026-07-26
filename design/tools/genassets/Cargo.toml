@@ -1,0 +1,13 @@
+# Tool offline de generación de assets. NO forma parte del workspace del
+# producto: la tabla [workspace] vacía de abajo lo aísla para que resvg y
+# compañía no entren en el Cargo.lock de RustCapture.
+[package]
+name = "genassets"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+resvg = "0.45"
+png = "0.18"
+
+[workspace]

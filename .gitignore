@@ -1,5 +1,7 @@
 # Cargo
 /target/
+design/tools/genassets/target/
+design/tools/genassets/Cargo.lock
 **/*.rs.bk
 
 # Símbolos de depuración MSVC
