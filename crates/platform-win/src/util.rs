@@ -1,6 +1,12 @@
 //! Micro-utilidades internas del crate (antes duplicadas por módulo).
 
-use windows::Win32::Foundation::LPARAM;
+use rustcapture_core::annotate::Color;
+use windows::Win32::Foundation::{COLORREF, LPARAM};
+
+/// Color del motor → `COLORREF` de GDI, que va en BGR (no RGB) y sin alfa.
+pub(crate) fn colorref(c: Color) -> COLORREF {
+    COLORREF(c.r as u32 | (c.g as u32) << 8 | (c.b as u32) << 16)
+}
 
 /// Coordenadas del cursor empaquetadas en el lparam de los mensajes de
 /// ratón (con signo: los monitores pueden tener origen negativo).

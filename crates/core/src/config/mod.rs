@@ -14,6 +14,24 @@ pub struct Config {
     pub hotkeys: HotkeysConfig,
     pub capture: CaptureConfig,
     pub theme: ThemeConfig,
+    pub text: TextConfig,
+}
+
+/// Tipografía por defecto de la herramienta de texto (f.54). Si la familia
+/// no existe en el sistema, el editor cae a Segoe UI y luego a la primera
+/// del catálogo: un nombre mal escrito no deja el texto sin fuente.
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
+#[serde(default)]
+pub struct TextConfig {
+    pub familia: String,
+}
+
+impl Default for TextConfig {
+    fn default() -> Self {
+        Self {
+            familia: "Segoe UI".to_string(),
+        }
+    }
 }
 
 /// Apariencia de la GUI: claro/oscuro o seguir al sistema.
@@ -290,6 +308,11 @@ mod tests {
     fn el_tema_por_defecto_es_auto() {
         assert_eq!(Config::default().theme.mode, ThemeMode::Auto);
         assert_eq!(Config::from_toml("").unwrap().theme.mode, ThemeMode::Auto);
+        // La familia por defecto no depende de que exista la sección.
+        assert_eq!(Config::default().text.familia, "Segoe UI");
+        assert_eq!(Config::from_toml("").unwrap().text.familia, "Segoe UI");
+        let c = Config::from_toml("[text]\nfamilia = \"Consolas\"\n").unwrap();
+        assert_eq!(c.text.familia, "Consolas");
     }
 
     #[test]

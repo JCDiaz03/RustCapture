@@ -6,7 +6,7 @@ use crate::annotate::annotations::Annotation;
 use crate::annotate::canvas::Canvas;
 use crate::annotate::giro::Giro;
 use crate::annotate::shapes;
-use crate::annotate::style::{Color, TextStyle};
+use crate::annotate::style::{Color, FamiliaId, TextStyle};
 use crate::annotate::text::{RenderContext, draw_text, draw_text_rotado, text_ink_box};
 use crate::ports::Rect;
 
@@ -65,13 +65,15 @@ impl StepAnnotation {
     }
 
     /// Estilo y etiqueta del número: un solo sitio, lo comparten el render
-    /// normal y el girado.
+    /// normal y el girado. El número usa la familia de respaldo a propósito:
+    /// es un indicador, no texto del usuario.
     fn estilo_numero(&self) -> (TextStyle, String) {
         (
             TextStyle {
                 color: self.color.contraste(),
                 size: self.font_size,
                 bold: true,
+                familia: FamiliaId::default(),
             },
             self.number.to_string(),
         )

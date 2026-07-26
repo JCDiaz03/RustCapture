@@ -10,6 +10,7 @@ use windows::Win32::Graphics::Gdi::{
     HDC, InvalidateRect, SelectObject, SetBkMode, SetTextColor, TRANSPARENT,
 };
 use windows::Win32::UI::Controls::Dialogs::{CC_FULLOPEN, CC_RGBINIT, CHOOSECOLORW, ChooseColorW};
+use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, DestroyMenu, MF_CHECKED, MF_STRING, TPM_LEFTALIGN,
     TPM_RETURNCMD, TPM_TOPALIGN, TrackPopupMenu,
@@ -30,6 +31,7 @@ pub(super) enum Accion {
     ElegirColor,
     ToggleCensura,
     MenuCensuraPx,
+    MenuFuente,
 }
 
 #[derive(PartialEq, Debug)]
@@ -48,8 +50,22 @@ fn texto_censura(modo: CensorMode) -> (&'static str, &'static str) {
     }
 }
 
-/// Composición pura de los chips para la herramienta activa.
-pub(super) fn chips(herramienta: Herramienta, p: &Propiedades) -> Vec<Chip> {
+/// Herramienta que gobierna los chips. Con una caja de texto abierta manda
+/// el TEXTO aunque la herramienta activa sea otra: a la reedición se llega
+/// con el doble clic de la Selección, y allí hacen falta los chips de texto
+/// para poder cambiar fuente, tamaño, negrita y color (f.54).
+pub(super) fn herramienta_de_chips(activa: Herramienta, caja_abierta: bool) -> Herramienta {
+    if caja_abierta {
+        Herramienta::Texto
+    } else {
+        activa
+    }
+}
+
+/// Composición pura de los chips para la herramienta activa. `fuente` es el
+/// nombre de la familia vigente, que vive en el catálogo del `RenderContext`
+/// y no en `Propiedades` (allí solo está su id).
+pub(super) fn chips(herramienta: Herramienta, p: &Propiedades, fuente: &str) -> Vec<Chip> {
     let color = Chip {
         etiqueta: "Color".to_string(),
         muestra_color: true,
@@ -59,6 +75,11 @@ pub(super) fn chips(herramienta: Herramienta, p: &Propiedades) -> Vec<Chip> {
         // Operan sobre objetos existentes: no hay nada que preconfigurar.
         Herramienta::Seleccion | Herramienta::Goma => Vec::new(),
         Herramienta::Texto => vec![
+            Chip {
+                etiqueta: fuente.to_string(),
+                muestra_color: false,
+                accion: Accion::MenuFuente,
+            },
             Chip {
                 etiqueta: format!("Tamaño {}", p.tamano_texto as u32),
                 muestra_color: false,
@@ -115,7 +136,11 @@ pub(super) fn pintar(
     escala: Escala,
 ) -> Vec<(RECT, Accion)> {
     let paleta = theme::actual().paleta();
-    let lista = chips(state.herramienta, &state.props);
+    let lista = chips(
+        herramienta_de_chips(state.herramienta, state.edit.is_some()),
+        &state.props,
+        state.ctx.nombre(state.props.familia).unwrap_or("—"),
+    );
     let mut zonas = Vec::with_capacity(lista.len());
     // SAFETY: DC del back buffer vivo; brochas propias liberadas aquí.
     unsafe {
@@ -149,15 +174,7 @@ pub(super) fn pintar(
                     right: x + medida.cx + hueco + swatch,
                     bottom: cy + swatch / 2,
                 };
-                lienzo::rellenar(
-                    dc,
-                    &caja,
-                    COLORREF(
-                        state.props.color.r as u32
-                            | (state.props.color.g as u32) << 8
-                            | (state.props.color.b as u32) << 16,
-                    ),
-                );
+                lienzo::rellenar(dc, &caja, crate::util::colorref(state.props.color));
                 lienzo::marco(dc, &caja, paleta.borde);
             }
             zonas.push((zona, chip.accion));
@@ -195,6 +212,7 @@ pub(super) fn on_click(hwnd: HWND, state: &mut EditorState, p: (i32, i32)) -> bo
         }
         Accion::ToggleNegrita => state.props.negrita = !state.props.negrita,
         Accion::ElegirColor => elegir_color(hwnd, state),
+        Accion::MenuFuente => elegir_fuente(hwnd, state, p),
         Accion::ToggleCensura => state.props.alternar_censura(),
         Accion::MenuCensuraPx => {
             let etiquetas: Vec<String> = CENSURAS.iter().map(|c| format!("{c} px")).collect();
@@ -204,9 +222,51 @@ pub(super) fn on_click(hwnd: HWND, state: &mut EditorState, p: (i32, i32)) -> bo
             }
         }
     }
+    // Si hay una caja de texto abierta, los chips mandan sobre ella: se
+    // rehace su fuente para que lo que escribes se vea como quedará.
+    super::texto::refrescar_fuente(hwnd, state);
+    // El menú (o el diálogo de color) le ha robado el foco a la caja: hay
+    // que devolvérselo para poder seguir escribiendo sin volver a pulsarla.
+    if let Some(edit) = state.edit.as_ref() {
+        // SAFETY: el EDIT está vivo (lo posee `state.edit`).
+        unsafe { _ = SetFocus(Some(edit.hwnd)) };
+    }
     // SAFETY: invalidación de la propia ventana (repinta los chips).
     unsafe { _ = InvalidateRect(Some(hwnd), None, false) };
     true
+}
+
+/// Menú de familias del catálogo (f.54). Al elegir una se cargan sus caras
+/// del disco si aún no estaban: el catálogo solo trae los nombres
+/// registrados, y parsear las 228 al abrir el editor sería absurdo.
+fn elegir_fuente(hwnd: HWND, state: &mut EditorState, p: (i32, i32)) {
+    let etiquetas: Vec<String> = state.familias.iter().map(|(_, n)| n.clone()).collect();
+    let actual = state
+        .familias
+        .iter()
+        .position(|(id, _)| *id == state.props.familia);
+    let Some(i) = menu_de_opciones(hwnd, p, &etiquetas, actual) else {
+        return;
+    };
+    let (id, nombre) = state.familias[i].clone();
+    if state.ctx.tiene_familia(id) {
+        state.props.familia = id;
+        return;
+    }
+    // Sin caras aún: buscarla en el catálogo del sistema y cargarla.
+    let cargada = crate::fuentes_ttf::catalogo()
+        .iter()
+        .find(|f| f.nombre == nombre)
+        .is_some_and(|f| super::estado::cargar_familia(&mut state.ctx, id, f));
+    if cargada {
+        state.props.familia = id;
+    } else {
+        // No se pudo leer o no es rasterizable (un .ttf corrupto en la
+        // carpeta portable, por ejemplo): se deja la familia anterior y se
+        // retira de la lista, para no volver a ofrecer algo que no pinta.
+        state.familias.retain(|(otro, _)| *otro != id);
+        crate::alerts::error_beep();
+    }
 }
 
 /// Menú popup en el punto del clic; devuelve el índice elegido.
@@ -244,11 +304,7 @@ fn menu_de_opciones(hwnd: HWND, p: (i32, i32), etiquetas: &[String], marcado: Op
 /// Diálogo de color estándar de Windows.
 fn elegir_color(hwnd: HWND, state: &mut EditorState) {
     static mut CUSTOM: [COLORREF; 16] = [COLORREF(0x00FFFFFF); 16];
-    let actual = COLORREF(
-        state.props.color.r as u32
-            | (state.props.color.g as u32) << 8
-            | (state.props.color.b as u32) << 16,
-    );
+    let actual = crate::util::colorref(state.props.color);
     // SAFETY: struct completo; CUSTOM es estático y solo se usa aquí, en
     // el hilo de UI.
     unsafe {
@@ -285,7 +341,7 @@ mod tests {
             Herramienta::Elipse,
             Herramienta::Lapiz,
         ] {
-            let chips = chips(h, &p);
+            let chips = chips(h, &p, "Segoe UI");
             assert_eq!(chips.len(), 2, "{h:?}");
             assert_eq!(chips[0].etiqueta, "Grosor 3 px");
             assert_eq!(chips[0].accion, Accion::MenuGrosor);
@@ -294,37 +350,72 @@ mod tests {
     }
 
     #[test]
-    fn el_texto_lleva_tamano_negrita_y_color() {
+    fn el_texto_lleva_fuente_tamano_negrita_y_color() {
         let p = Propiedades {
             tamano_texto: 28.0,
             negrita: true,
             ..Propiedades::default()
         };
-        let chips = chips(Herramienta::Texto, &p);
-        assert_eq!(chips.len(), 3);
-        assert_eq!(chips[0].etiqueta, "Tamaño 28");
-        assert_eq!(chips[1].etiqueta, "Negrita: sí");
-        assert_eq!(chips[1].accion, Accion::ToggleNegrita);
-        assert_eq!(chips[2].accion, Accion::ElegirColor);
+        let chips = chips(Herramienta::Texto, &p, "Consolas");
+        assert_eq!(chips.len(), 4);
+        assert_eq!(chips[0].etiqueta, "Consolas");
+        assert_eq!(chips[0].accion, Accion::MenuFuente);
+        assert_eq!(chips[1].etiqueta, "Tamaño 28");
+        assert_eq!(chips[2].etiqueta, "Negrita: sí");
+        assert_eq!(chips[2].accion, Accion::ToggleNegrita);
+        assert_eq!(chips[3].accion, Accion::ElegirColor);
+        assert!(chips[3].muestra_color);
     }
 
     #[test]
     fn el_resaltador_solo_lleva_color() {
-        let chips = chips(Herramienta::Resaltador, &Propiedades::default());
+        let chips = chips(Herramienta::Resaltador, &Propiedades::default(), "Segoe UI");
         assert_eq!(chips.len(), 1);
         assert!(chips[0].muestra_color);
     }
 
     #[test]
+    fn con_una_caja_de_texto_abierta_mandan_los_chips_de_texto() {
+        // Se llega a reeditar con el doble clic de la Selección: si los chips
+        // siguieran los de la herramienta activa, no habría forma de cambiar
+        // fuente ni color de lo que estás escribiendo.
+        for activa in [
+            Herramienta::Seleccion,
+            Herramienta::Goma,
+            Herramienta::Flecha,
+            Herramienta::Pixelado,
+        ] {
+            assert_eq!(
+                herramienta_de_chips(activa, true),
+                Herramienta::Texto,
+                "{activa:?} con caja abierta"
+            );
+        }
+        // Sin caja abierta, cada herramienta manda lo suyo.
+        assert_eq!(
+            herramienta_de_chips(Herramienta::Seleccion, false),
+            Herramienta::Seleccion
+        );
+        // Y esos chips son los cuatro del texto.
+        let lista = chips(
+            herramienta_de_chips(Herramienta::Seleccion, true),
+            &Propiedades::default(),
+            "Segoe UI",
+        );
+        assert_eq!(lista.len(), 4);
+        assert_eq!(lista[0].accion, Accion::MenuFuente);
+    }
+
+    #[test]
     fn seleccion_y_goma_no_llevan_chips() {
         let p = Propiedades::default();
-        assert!(chips(Herramienta::Seleccion, &p).is_empty());
-        assert!(chips(Herramienta::Goma, &p).is_empty());
+        assert!(chips(Herramienta::Seleccion, &p, "Segoe UI").is_empty());
+        assert!(chips(Herramienta::Goma, &p, "Segoe UI").is_empty());
     }
 
     #[test]
     fn el_pixelado_lleva_modo_y_px_pero_no_color() {
-        let chips = chips(Herramienta::Pixelado, &Propiedades::default());
+        let chips = chips(Herramienta::Pixelado, &Propiedades::default(), "Segoe UI");
         assert_eq!(chips.len(), 2);
         assert_eq!(chips[0].etiqueta, "Modo: mosaico");
         assert_eq!(chips[0].accion, Accion::ToggleCensura);
@@ -339,14 +430,14 @@ mod tests {
             censura: CensorMode::Blur { radius: 12 },
             ..Propiedades::default()
         };
-        let chips = chips(Herramienta::Pixelado, &p);
+        let chips = chips(Herramienta::Pixelado, &p, "Segoe UI");
         assert_eq!(chips[0].etiqueta, "Modo: desenfoque");
         assert_eq!(chips[1].etiqueta, "Radio 12 px");
     }
 
     #[test]
     fn los_pasos_llevan_tamano_y_color() {
-        let chips = chips(Herramienta::Pasos, &Propiedades::default());
+        let chips = chips(Herramienta::Pasos, &Propiedades::default(), "Segoe UI");
         assert_eq!(chips.len(), 2);
         assert_eq!(chips[0].etiqueta, "Tamaño 20");
         assert_eq!(chips[0].accion, Accion::MenuTamano);

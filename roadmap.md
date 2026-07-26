@@ -63,6 +63,7 @@ Convierte el editor en un editor de verdad: los objetos colocados dejan de ser i
 - ✅ S-D — Pixelado/desenfoque (f.25) y pasos numerados (f.23).
 - ✅ S-E — Motor cerrado en un enum (`Objeto`), selección, movimiento, reedición de texto y goma (f.52, f.27).
 - ✅ S-F — Rotación con asa y snap (f.53).
+- ✅ S-G — Catálogo de fuentes: familias del sistema y de la carpeta `fonts/` portable, chip de fuente y edición en vivo de fuente/tamaño/negrita/color con la caja abierta (f.54).
 
 ## 4b. F3.5 — Rediseño visual V4 (D13)
 

@@ -1,42 +1,99 @@
-//! Contexto de render: las fuentes llegan inyectadas como bytes (el core
-//! nunca abre archivos). Sin fuente, el texto es no-op documentado.
+//! Contexto de render: CATÁLOGO de caras tipográficas (f.54). Las fuentes
+//! llegan inyectadas como bytes — el core nunca abre archivos ni consulta el
+//! registro (D1/D2); eso es trabajo de `platform-win::fuentes_ttf`. Sin
+//! ninguna cara cargada, el texto es no-op documentado.
+
+use std::collections::HashMap;
+
+use crate::annotate::canvas::Canvas;
+use crate::annotate::giro::Giro;
+use crate::annotate::style::{FamiliaId, TextStyle};
+use crate::ports::Rect;
 
 pub struct RenderContext {
-    normal: Option<fontdue::Font>,
-    bold: Option<fontdue::Font>,
+    /// Nombres por id: el índice ES el `FamiliaId`.
+    nombres: Vec<String>,
+    /// Caras cargadas por (familia, negrita).
+    caras: HashMap<(u16, bool), fontdue::Font>,
 }
 
 impl RenderContext {
-    /// Carga ambas variantes desde bytes TTF/OTF.
+    pub fn nueva() -> Self {
+        Self {
+            nombres: Vec::new(),
+            caras: HashMap::new(),
+        }
+    }
+
+    /// Atajo del caso de siempre: una sola familia con sus dos caras, que
+    /// queda registrada como la de respaldo.
     pub fn new(font: &[u8], bold: &[u8]) -> Result<Self, String> {
-        let settings = fontdue::FontSettings::default();
-        Ok(Self {
-            normal: Some(fontdue::Font::from_bytes(font, settings).map_err(String::from)?),
-            bold: Some(fontdue::Font::from_bytes(bold, settings).map_err(String::from)?),
-        })
+        let mut ctx = Self::nueva();
+        let id = ctx.registrar_familia("(por defecto)");
+        ctx.cargar_cara(id, false, font)?;
+        ctx.cargar_cara(id, true, bold)?;
+        Ok(ctx)
     }
 
     /// Contexto sin tipografía: todo salvo el texto funciona igual.
     pub fn sin_fuente() -> Self {
-        Self {
-            normal: None,
-            bold: None,
-        }
+        Self::nueva()
     }
 
-    pub(crate) fn font(&self, bold: bool) -> Option<&fontdue::Font> {
-        if bold {
-            self.bold.as_ref()
-        } else {
-            self.normal.as_ref()
+    /// Registra una familia (o devuelve su id si ya estaba). La PRIMERA que
+    /// se registra es la de respaldo: a ella caen las que no tengan caras.
+    pub fn registrar_familia(&mut self, nombre: &str) -> FamiliaId {
+        if let Some(i) = self.nombres.iter().position(|n| n == nombre) {
+            return FamiliaId(i as u16);
         }
+        self.nombres.push(nombre.to_string());
+        FamiliaId((self.nombres.len() - 1) as u16)
+    }
+
+    /// Carga los bytes de una cara. Error si el TTF no se puede parsear; el
+    /// catálogo queda intacto en ese caso.
+    pub fn cargar_cara(&mut self, id: FamiliaId, bold: bool, ttf: &[u8]) -> Result<(), String> {
+        let font = fontdue::Font::from_bytes(ttf, fontdue::FontSettings::default())
+            .map_err(String::from)?;
+        self.caras.insert((id.0, bold), font);
+        Ok(())
+    }
+
+    /// `true` si esa familia ya tiene alguna cara cargada (para no releer
+    /// del disco al volver a elegirla).
+    pub fn tiene_familia(&self, id: FamiliaId) -> bool {
+        self.caras.contains_key(&(id.0, false)) || self.caras.contains_key(&(id.0, true))
+    }
+
+    pub fn nombre(&self, id: FamiliaId) -> Option<&str> {
+        self.nombres.get(id.0 as usize).map(String::as_str)
+    }
+
+    pub fn familias(&self) -> Vec<(FamiliaId, &str)> {
+        self.nombres
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (FamiliaId(i as u16), n.as_str()))
+            .collect()
+    }
+
+    pub fn tiene_alguna(&self) -> bool {
+        !self.caras.is_empty()
+    }
+
+    /// Cara para un estilo, con cadena de respaldo: la pedida → la misma
+    /// familia sin negrita → la familia de respaldo con negrita → la de
+    /// respaldo normal. Así una fuente ausente o corrupta degrada en vez de
+    /// dejar el texto sin pintar.
+    pub(crate) fn font(&self, style: TextStyle) -> Option<&fontdue::Font> {
+        let f = style.familia.0;
+        self.caras
+            .get(&(f, style.bold))
+            .or_else(|| self.caras.get(&(f, false)))
+            .or_else(|| self.caras.get(&(0, style.bold)))
+            .or_else(|| self.caras.get(&(0, false)))
     }
 }
-
-use crate::annotate::canvas::Canvas;
-use crate::annotate::giro::Giro;
-use crate::annotate::style::TextStyle;
-use crate::ports::Rect;
 
 /// Recorre la cobertura de todos los glifos del texto llamando a `emitir`
 /// con `(x, y, cobertura)` en coordenadas RELATIVAS a `pos`.
@@ -51,7 +108,7 @@ fn recorrer_glifos(
     ctx: &RenderContext,
     mut emitir: impl FnMut(i32, i32, u8),
 ) {
-    let Some(font) = ctx.font(style.bold) else {
+    let Some(font) = ctx.font(style) else {
         return;
     };
     let line_height = (style.size * 1.2).round() as i32;
@@ -218,10 +275,16 @@ mod tests {
     use crate::annotate::style::Color;
     use crate::ports::Frame;
 
+    fn ttf_normal() -> Vec<u8> {
+        std::fs::read("C:/Windows/Fonts/segoeui.ttf").expect("fuente del sistema")
+    }
+
+    fn ttf_bold() -> Vec<u8> {
+        std::fs::read("C:/Windows/Fonts/segoeuib.ttf").expect("fuente del sistema")
+    }
+
     fn ctx_con_fuente() -> RenderContext {
-        let normal = std::fs::read("C:/Windows/Fonts/segoeui.ttf").expect("fuente del sistema");
-        let bold = std::fs::read("C:/Windows/Fonts/segoeuib.ttf").expect("fuente del sistema");
-        RenderContext::new(&normal, &bold).unwrap()
+        RenderContext::new(&ttf_normal(), &ttf_bold()).unwrap()
     }
 
     fn estilo(size: f32) -> TextStyle {
@@ -229,7 +292,103 @@ mod tests {
             color: Color::rgb(255, 0, 0),
             size,
             bold: true,
+            familia: FamiliaId::default(),
         }
+    }
+
+    #[test]
+    fn el_catalogo_registra_familias_y_devuelve_sus_nombres() {
+        let mut ctx = RenderContext::nueva();
+        let a = ctx.registrar_familia("Segoe UI");
+        let b = ctx.registrar_familia("Consolas");
+        assert_ne!(a, b);
+        assert_eq!(ctx.nombre(a), Some("Segoe UI"));
+        assert_eq!(ctx.nombre(b), Some("Consolas"));
+        // Registrar la misma familia dos veces devuelve el mismo id.
+        assert_eq!(ctx.registrar_familia("Segoe UI"), a);
+        assert_eq!(ctx.familias().len(), 2);
+        assert_eq!(ctx.nombre(FamiliaId(77)), None);
+    }
+
+    #[test]
+    fn una_cara_no_cargada_cae_a_la_que_haya() {
+        let mut ctx = RenderContext::nueva();
+        let id = ctx.registrar_familia("Segoe UI");
+        // Solo la normal cargada: pedir negrita debe caer a la normal.
+        ctx.cargar_cara(id, false, &ttf_normal()).unwrap();
+        let normal = TextStyle {
+            color: Color::rgb(0, 0, 0),
+            size: 20.0,
+            bold: false,
+            familia: id,
+        };
+        let negrita = TextStyle { bold: true, ..normal };
+        assert!(ctx.font(normal).is_some());
+        assert!(ctx.font(negrita).is_some(), "la negrita no cayó a la normal");
+    }
+
+    #[test]
+    fn una_familia_ausente_cae_a_la_familia_por_defecto() {
+        let mut ctx = RenderContext::nueva();
+        let defecto = ctx.registrar_familia("Segoe UI");
+        assert_eq!(defecto, FamiliaId(0), "la primera registrada es la de respaldo");
+        ctx.cargar_cara(defecto, false, &ttf_normal()).unwrap();
+        // Familia registrada pero SIN caras cargadas.
+        let vacia = ctx.registrar_familia("Fuente Que No Existe");
+        let style = TextStyle {
+            color: Color::rgb(0, 0, 0),
+            size: 20.0,
+            bold: false,
+            familia: vacia,
+        };
+        assert!(
+            ctx.font(style).is_some(),
+            "una familia sin caras debe caer a la por defecto"
+        );
+    }
+
+    #[test]
+    fn un_contexto_vacio_no_tiene_fuentes() {
+        let ctx = RenderContext::sin_fuente();
+        assert!(!ctx.tiene_alguna());
+        assert!(ctx.font(estilo(20.0)).is_none());
+    }
+
+    #[test]
+    fn un_ttf_invalido_da_error_y_no_ensucia_el_catalogo() {
+        let mut ctx = RenderContext::nueva();
+        let id = ctx.registrar_familia("Basura");
+        assert!(ctx.cargar_cara(id, false, b"no soy un ttf").is_err());
+        let style = TextStyle {
+            color: Color::rgb(0, 0, 0),
+            size: 20.0,
+            bold: false,
+            familia: id,
+        };
+        assert!(ctx.font(style).is_none());
+    }
+
+    #[test]
+    fn dos_familias_distintas_rasterizan_distinto() {
+        let mut ctx = RenderContext::nueva();
+        let sans = ctx.registrar_familia("Segoe UI");
+        ctx.cargar_cara(sans, false, &ttf_normal()).unwrap();
+        let mono = ctx.registrar_familia("Consolas");
+        ctx.cargar_cara(
+            mono,
+            false,
+            &std::fs::read("C:/Windows/Fonts/consola.ttf").expect("Consolas"),
+        )
+        .unwrap();
+        let base = TextStyle {
+            color: Color::rgb(255, 0, 0),
+            size: 24.0,
+            bold: false,
+            familia: sans,
+        };
+        let caja_sans = text_ink_box("Hola", base, &ctx).unwrap();
+        let caja_mono = text_ink_box("Hola", TextStyle { familia: mono, ..base }, &ctx).unwrap();
+        assert_ne!(caja_sans, caja_mono, "las dos familias miden igual");
     }
 
     #[test]

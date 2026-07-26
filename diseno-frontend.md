@@ -18,7 +18,7 @@
 
 ## 2. Tokens visuales
 
-- **Tipografía:** Segoe UI (sistema), tamaños 12/13 px cuerpo, 11 px secundario. Sin fuentes embebidas.
+- **Tipografía:** Segoe UI (sistema), tamaños 12/13 px cuerpo, 11 px secundario. Sin fuentes embebidas. Eso vale para el *chrome* de la app; el texto que el usuario anota (f.54) usa la familia que elija del catálogo (sistema + carpeta `fonts/`).
 - **Paleta neutra + 1 acento.** Claro: fondos #F3F3F3 / #FFFFFF, texto #1A1A1A, bordes #D0D0D0. Oscuro: fondos #202020 / #2B2B2B, texto #E8E8E8, bordes #3F3F3F. Acento único (selección, grabando, botón primario): #D83B01 para estado de grabación, #0067C0 para selección/acción. Nada más.
 - **Geometría:** radios 4 px, bordes 1 px, espaciado en múltiplos de 4 px. Botones de toolbar 28×28 px lógicos con icono de 16 px.
 
@@ -44,7 +44,7 @@ Ventana fullscreen sin bordes sobre el frame congelado (oscurecido ~30 % fuera d
 Ventana principal de edición, redimensionable.
 - Toolbar superior: selección, texto, flecha, línea, forma, elipse, lápiz, resaltador, pasos numerados, pixelado, goma `(hechas)`, leyenda `(D)` | recorte, redimensionar `(D)` | deshacer/rehacer `(hechos)`.
 - Objeto seleccionado: marco punteado de 1 px en el acento `#0067C0` con 8 asas cuadradas de 6 px lógicos (esquinas y puntos medios) y un botón REDONDO de rotación de 24 px con el icono `edit-rotate`, situado fuera del recuadro a la derecha de la esquina superior derecha y a la altura de su borde superior (separación 26 px lógicos al centro); ese botón solo aparece con la herramienta Selección activa, no con la goma. Clic elige el objeto de más arriba del z-order, arrastre lo mueve, arrastrar el botón redondo lo gira (Shift = salto de 15°), doble clic sobre un texto lo reedita, Esc suelta, Supr o la goma lo borran `(hecho)`.
-- Barra de propiedades contextual bajo la toolbar (grosor, color, tamaño de fuente, negrita, modo de censura y bloque/radio) `(hecha, con chips + menú popup)`.
+- Barra de propiedades contextual bajo la toolbar (fuente, grosor, color, tamaño de fuente, negrita, modo de censura y bloque/radio) `(hecha, con chips + menú popup)`. Con la caja de texto abierta los chips actúan sobre ella en vivo: cambiar fuente, tamaño, negrita o color se ve dentro de la caja antes de confirmar.
 - Canvas central con ajuste a ventana `(hecho)`; zoom Ctrl+rueda `(diferido)`.
 - Pestañas inferiores: una por captura abierta (miniatura + nombre) `(diferido)`.
 - Barra de estado: dimensiones, % de encaje, formato/archivo y estado de guardado `(hecha)`.

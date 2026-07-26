@@ -15,5 +15,5 @@ pub use canvas::Canvas;
 pub use document::{Command, Document, History};
 pub use giro::Giro;
 pub use objeto::{Forma, Objeto};
-pub use style::{CensorMode, Color, Style, TextStyle};
+pub use style::{CensorMode, Color, FamiliaId, Style, TextStyle};
 pub use text::RenderContext;

@@ -34,20 +34,23 @@ pub(super) struct EditBox {
     pub font: HFONT,
     /// Índice del objeto que se está REeditando; `None` = texto nuevo.
     pub editando: Option<usize>,
-    /// Estilo con el que se confirmará. Al reeditar es el del objeto
-    /// original, no el vigente en la barra: cambiar de color con un texto
-    /// abierto no debe reestilarlo por sorpresa.
-    pub estilo: TextStyle,
+}
+
+/// Estilo con el que se confirmará la caja: SIEMPRE el vigente en la barra.
+/// Los chips mandan sobre la caja abierta (f.54); al reeditar, el estilo del
+/// objeto se carga antes en la barra, así no se pierde ni cambia por sorpresa.
+fn estilo_actual(state: &EditorState) -> TextStyle {
+    TextStyle {
+        color: state.props.color,
+        size: state.props.tamano_texto,
+        bold: state.props.negrita,
+        familia: state.props.familia,
+    }
 }
 
 /// Caja de texto para un texto NUEVO, en el punto del clic.
 pub(super) fn abrir_edit(hwnd: HWND, state: &mut EditorState, pos_frame: (i32, i32), destino: Rect) {
-    let estilo = TextStyle {
-        color: state.props.color,
-        size: state.props.tamano_texto,
-        bold: state.props.negrita,
-    };
-    crear_caja(hwnd, state, pos_frame, destino, "", estilo, None);
+    crear_caja(hwnd, state, pos_frame, destino, "", None);
 }
 
 /// Caja de texto sobre un `TextAnnotation` ya colocado (doble clic con la
@@ -68,8 +71,79 @@ pub(super) fn abrir_reedicion(
         return false;
     };
     let (pos, texto, estilo) = (t.pos, t.text.clone(), t.style);
-    crear_caja(hwnd, state, pos, destino, &texto, estilo, Some(index));
+    // El estilo del objeto pasa a la barra: los chips muestran lo que estás
+    // editando y desde ahí se cambia.
+    state.props.color = estilo.color;
+    state.props.tamano_texto = estilo.size;
+    state.props.negrita = estilo.bold;
+    state.props.familia = estilo.familia;
+    crear_caja(hwnd, state, pos, destino, &texto, Some(index));
     true
+}
+
+/// Rehace la fuente de la caja abierta a partir de las propiedades vigentes.
+/// La llama `props::on_click` tras cambiar cualquier chip; no hace nada si no
+/// hay caja.
+pub(super) fn refrescar_fuente(hwnd: HWND, state: &mut EditorState) {
+    if state.edit.is_none() {
+        return;
+    }
+    let nueva = crear_hfont(state);
+    // SAFETY: se sustituye la fuente del EDIT vivo y se borra la anterior,
+    // que ya no está seleccionada en ningún DC.
+    unsafe {
+        if let Some(edit) = state.edit.as_mut() {
+            let vieja = edit.font;
+            edit.font = nueva;
+            if !nueva.is_invalid() {
+                SendMessageW(
+                    edit.hwnd,
+                    WM_SETFONT,
+                    Some(WPARAM(nueva.0 as usize)),
+                    Some(LPARAM(1)),
+                );
+            }
+            if !vieja.is_invalid() {
+                _ = DeleteObject(vieja.into());
+            }
+            _ = InvalidateRect(Some(edit.hwnd), None, true);
+        }
+        _ = InvalidateRect(Some(hwnd), None, false);
+    }
+}
+
+/// `HFONT` que refleja las propiedades vigentes, con la familia REAL del
+/// catálogo (no la de respaldo): así la caja se ve como quedará la anotación.
+fn crear_hfont(state: &EditorState) -> HFONT {
+    let familia = state
+        .ctx
+        .nombre(state.props.familia)
+        .unwrap_or("Segoe UI")
+        .to_string();
+    let nombre = wide(&familia);
+    // SAFETY: `nombre` vive durante la llamada; el HFONT lo posee el EditBox.
+    unsafe {
+        CreateFontW(
+            state.props.tamano_texto.round() as i32,
+            0,
+            0,
+            0,
+            if state.props.negrita {
+                FW_BOLD.0 as i32
+            } else {
+                FW_NORMAL.0 as i32
+            },
+            0,
+            0,
+            0,
+            DEFAULT_CHARSET,
+            OUT_DEFAULT_PRECIS,
+            CLIP_DEFAULT_PRECIS,
+            DEFAULT_QUALITY,
+            DEFAULT_PITCH.0 as u32,
+            PCWSTR(nombre.as_ptr()),
+        )
+    }
 }
 
 fn crear_caja(
@@ -78,7 +152,6 @@ fn crear_caja(
     pos_frame: (i32, i32),
     destino: Rect,
     inicial: &str,
-    estilo: TextStyle,
     editando: Option<usize>,
 ) {
     // INVARIANTE: hay como máximo un EDIT vivo, y siempre es el de
@@ -117,26 +190,7 @@ fn crear_caja(
         ) else {
             return;
         };
-        let font = CreateFontW(
-            estilo.size.round() as i32,
-            0,
-            0,
-            0,
-            if estilo.bold {
-                FW_BOLD.0 as i32
-            } else {
-                FW_NORMAL.0 as i32
-            },
-            0,
-            0,
-            0,
-            DEFAULT_CHARSET,
-            OUT_DEFAULT_PRECIS,
-            CLIP_DEFAULT_PRECIS,
-            DEFAULT_QUALITY,
-            DEFAULT_PITCH.0 as u32,
-            w!("Segoe UI"),
-        );
+        let font = crear_hfont(state);
         if !font.is_invalid() {
             SendMessageW(
                 edit,
@@ -164,7 +218,6 @@ fn crear_caja(
             pos_frame,
             font,
             editando,
-            estilo,
         });
     }
 }
@@ -236,7 +289,8 @@ pub(super) fn commit_text(hwnd: HWND, state: &mut EditorState) {
     let len = unsafe { GetWindowTextW(edit.hwnd, &mut buffer) } as usize;
     let texto = String::from_utf16_lossy(&buffer[..len]);
     let texto = texto.replace("\r\n", "\n");
-    let (pos, editando, estilo) = (edit.pos_frame, edit.editando, edit.estilo);
+    let (pos, editando) = (edit.pos_frame, edit.editando);
+    let estilo = estilo_actual(state);
     cerrar_edit(edit);
 
     let vacio = texto.trim().is_empty();

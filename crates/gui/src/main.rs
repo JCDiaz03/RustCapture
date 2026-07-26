@@ -81,6 +81,7 @@ fn main() -> ExitCode {
         delay_ms,
         config.hotkeys.clone(),
         config.theme.mode,
+        config.text.familia.clone(),
     ) {
         Ok(b) => b,
         Err(e) => {

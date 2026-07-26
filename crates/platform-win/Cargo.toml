@@ -3,6 +3,11 @@ name = "platform-win"
 version.workspace = true
 edition.workspace = true
 
+[dev-dependencies]
+# Solo para verificar en tests que el catálogo de fuentes ofrece archivos
+# que de verdad se pueden rasterizar. En runtime las parsea el core.
+fontdue = { workspace = true }
+
 [dependencies]
 rustcapture-core.workspace = true
 windows = { version = "0.62", features = [

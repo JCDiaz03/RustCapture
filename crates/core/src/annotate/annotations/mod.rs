@@ -487,6 +487,7 @@ mod tests {
                 color: ROJO,
                 size: 24.0,
                 bold: true,
+                    familia: crate::annotate::style::FamiliaId::default(),
             },
         }
         .into();
@@ -556,6 +557,7 @@ mod tests {
                 color: ROJO,
                 size: 20.0,
                 bold: false,
+                    familia: crate::annotate::style::FamiliaId::default(),
             },
         };
         // Con fuente: aparecen píxeles rojos en la zona del texto.
@@ -581,6 +583,7 @@ mod tests {
                 color: ROJO,
                 size: 16.0,
                 bold: false,
+                    familia: crate::annotate::style::FamiliaId::default(),
             },
         };
         let mut frame = Frame::filled(60, 60, [0, 0, 0, 255]);

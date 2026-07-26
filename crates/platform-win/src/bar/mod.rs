@@ -51,6 +51,8 @@ struct BarState {
     delay_ms: u64,
     /// Hotkeys de config: alimentan los tooltips "Nombre (hotkey)".
     hotkeys: HotkeysConfig,
+    /// Tipografía por defecto que recibe el editor al abrirse (f.54).
+    familia_texto: String,
     /// Control de tooltips; vive lo que la ventana (RefCell: hilo de UI).
     tooltips: RefCell<Option<Tooltips>>,
 }
@@ -63,15 +65,17 @@ pub struct Bar {
 impl Bar {
     /// Crea y muestra la barra. `destination` = sink por defecto de la
     /// config; `delay_ms` = retardo del botón Delay; `hotkeys` alimenta
-    /// los tooltips y `theme_mode` la resolución de tema.
+    /// los tooltips, `theme_mode` la resolución de tema y `familia_texto`
+    /// la tipografía por defecto del editor (f.54).
     pub fn create(
         tx: Sender<AppEvent>,
         destination: &'static str,
         delay_ms: u64,
         hotkeys: HotkeysConfig,
         theme_mode: ThemeMode,
+        familia_texto: String,
     ) -> Result<Self, String> {
-        Self::create_win32(tx, destination, delay_ms, hotkeys, theme_mode)
+        Self::create_win32(tx, destination, delay_ms, hotkeys, theme_mode, familia_texto)
             .map_err(|e| e.to_string())
     }
 
@@ -81,6 +85,7 @@ impl Bar {
         delay_ms: u64,
         hotkeys: HotkeysConfig,
         theme_mode: ThemeMode,
+        familia_texto: String,
     ) -> windows::core::Result<Self> {
         theme::refrescar(theme_mode);
         // SAFETY: registro de clase + creación de ventana estándar; el
@@ -105,6 +110,7 @@ impl Bar {
                 destination,
                 delay_ms,
                 hotkeys,
+                familia_texto,
                 tooltips: RefCell::new(None),
             }));
             // Tamaño provisional: WM_CREATE lo corrige con el DPI real.
@@ -393,8 +399,11 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 // SAFETY: wparam es un Box<Frame> publicado por
                 // EditorSink; se toma posesión SIEMPRE.
                 let frame = *Box::from_raw(wparam.0 as *mut rustcapture_core::ports::Frame);
+                let familia = crate::ui::ventana::estado::<BarState>(hwnd)
+                    .map(|s| s.familia_texto.clone())
+                    .unwrap_or_default();
                 _ = ShowWindow(hwnd, SW_HIDE);
-                crate::editor::show_editor(frame);
+                crate::editor::show_editor(frame, &familia);
                 _ = ShowWindow(hwnd, SW_SHOW);
                 LRESULT(0)
             }

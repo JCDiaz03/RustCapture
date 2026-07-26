@@ -8,10 +8,11 @@ use rustcapture_core::annotate::annotations::{
     PixelateAnnotation, RectAnnotation,
 };
 use rustcapture_core::annotate::{
-    CensorMode, Color, Document, History, Objeto, RenderContext, Style,
+    CensorMode, Color, Document, FamiliaId, History, Objeto, RenderContext, Style,
 };
 use rustcapture_core::ports::Frame;
-use windows::Win32::Foundation::RECT;
+use windows::Win32::Foundation::{COLORREF, RECT};
+use windows::Win32::Graphics::Gdi::{CreateSolidBrush, DeleteObject, HBRUSH};
 
 use crate::gdi::raii::Dib;
 use crate::gdi::{copy_frame_to_dib, dib_from_frame};
@@ -37,6 +38,8 @@ pub(super) struct Propiedades {
     pub grosor: u32,
     pub tamano_texto: f32,
     pub negrita: bool,
+    /// Familia tipográfica elegida (f.54).
+    pub familia: FamiliaId,
     /// Modo de censura vigente, con su parámetro en px dentro.
     pub censura: CensorMode,
 }
@@ -48,6 +51,7 @@ impl Default for Propiedades {
             grosor: 3,
             tamano_texto: 20.0,
             negrita: false,
+            familia: FamiliaId::default(),
             censura: CensorMode::Mosaic { block: 8 },
         }
     }
@@ -76,6 +80,15 @@ impl Propiedades {
             CensorMode::Mosaic { .. } => CensorMode::Blur { radius: px },
             CensorMode::Blur { .. } => CensorMode::Mosaic { block: px },
         };
+    }
+}
+
+impl Drop for EditorState {
+    fn drop(&mut self) {
+        // SAFETY: la brocha la creó `brocha_caja` y nadie más la posee.
+        if let Some((_, brocha)) = self.brocha_caja.take() {
+            unsafe { _ = DeleteObject(brocha.into()) };
+        }
     }
 }
 
@@ -180,6 +193,10 @@ pub(super) struct EditorState {
     pub history: History,
     pub ctx: RenderContext,
     pub tiene_fuente: bool,
+    /// Familias del catálogo (f.54), ordenadas, para el menú del chip. Están
+    /// todas REGISTRADAS en `ctx` pero solo la vigente tiene caras cargadas:
+    /// parsear 228 TTF al abrir el editor sería absurdo.
+    pub familias: Vec<(FamiliaId, String)>,
     pub herramienta: Herramienta,
     pub props: Propiedades,
     /// Numeración de pasos, sincronizada con `history`.
@@ -199,13 +216,20 @@ pub(super) struct EditorState {
     /// Nombre del archivo tras Guardar como (título y status bar).
     pub nombre: Option<String>,
     pub tooltips: Option<Tooltips>,
+    /// Brocha de fondo de la caja de texto, cacheada: `WM_CTLCOLOREDIT` se
+    /// dispara en cada repintado del control y crear una brocha por mensaje
+    /// las filtraría.
+    brocha_caja: Option<(COLORREF, HBRUSH)>,
     /// Zonas clicables de la property bar (las rellena el pintado).
     pub chips: Vec<(RECT, Accion)>,
 }
 
 impl EditorState {
-    pub(super) fn new(base: Frame) -> windows::core::Result<Self> {
-        let (ctx, tiene_fuente) = cargar_contexto();
+    /// `preferida` es la familia por defecto (`[text].familia` de la config);
+    /// si no existe en el sistema se cae a Segoe UI y, en último término, a la
+    /// primera del catálogo.
+    pub(super) fn con_fuente(base: Frame, preferida: &str) -> windows::core::Result<Self> {
+        let (ctx, familias, tiene_fuente) = cargar_contexto(preferida);
         let screen = ScreenDc::get()?;
         let dc = MemDc::compatible_with(&screen)?;
         let committed = base.clone();
@@ -222,6 +246,7 @@ impl EditorState {
             history: History::new(),
             ctx,
             tiene_fuente,
+            familias,
             herramienta: Herramienta::Flecha,
             props: Propiedades::default(),
             pasos: ContadorPasos::new(),
@@ -234,8 +259,29 @@ impl EditorState {
             dirty: false,
             nombre: None,
             tooltips: None,
+            brocha_caja: None,
             chips: Vec::new(),
         })
+    }
+
+    /// Brocha del fondo de la caja de texto para `WM_CTLCOLOREDIT`. Se
+    /// reutiliza mientras el color no cambie (el tema puede cambiar en vivo).
+    pub(super) fn brocha_caja(&mut self, color: COLORREF) -> HBRUSH {
+        if let Some((c, b)) = self.brocha_caja
+            && c == color
+        {
+            return b;
+        }
+        // SAFETY: se libera la anterior antes de sustituirla; la última vive
+        // hasta el Drop del estado.
+        unsafe {
+            if let Some((_, vieja)) = self.brocha_caja.take() {
+                _ = DeleteObject(vieja.into());
+            }
+            let nueva = CreateSolidBrush(color);
+            self.brocha_caja = Some((color, nueva));
+            nueva
+        }
     }
 
     /// Regenera el frame comprometido (base + documento) sobre los
@@ -304,16 +350,50 @@ impl EditorState {
     }
 }
 
-fn cargar_contexto() -> (RenderContext, bool) {
-    let normal = std::fs::read("C:/Windows/Fonts/segoeui.ttf");
-    let bold = std::fs::read("C:/Windows/Fonts/segoeuib.ttf");
-    match (normal, bold) {
-        (Ok(n), Ok(b)) => match RenderContext::new(&n, &b) {
-            Ok(ctx) => (ctx, true),
-            Err(_) => (RenderContext::sin_fuente(), false),
-        },
-        _ => (RenderContext::sin_fuente(), false),
+/// Construye el `RenderContext` con el catálogo del sistema (f.54):
+/// REGISTRA todas las familias (barato, solo nombres) y carga las CARAS
+/// únicamente de la preferida. El resto se cargan al elegirlas, para no
+/// parsear cientos de TTF al abrir el editor.
+///
+/// La preferida se registra PRIMERA a propósito: es la `FamiliaId(0)`, la de
+/// respaldo a la que cae `RenderContext::font` cuando algo falta.
+fn cargar_contexto(preferida: &str) -> (RenderContext, Vec<(FamiliaId, String)>, bool) {
+    let mut ctx = RenderContext::nueva();
+    let catalogo = crate::fuentes_ttf::catalogo();
+    let elegida = catalogo
+        .iter()
+        .find(|f| f.nombre == preferida)
+        .or_else(|| catalogo.iter().find(|f| f.nombre == "Segoe UI"))
+        .or_else(|| catalogo.first());
+    let mut tiene_fuente = false;
+    if let Some(f) = elegida {
+        let id = ctx.registrar_familia(&f.nombre);
+        tiene_fuente = cargar_familia(&mut ctx, id, f);
     }
+    let familias = catalogo
+        .iter()
+        .map(|f| (ctx.registrar_familia(&f.nombre), f.nombre.clone()))
+        .collect();
+    (ctx, familias, tiene_fuente)
+}
+
+/// Lee del disco las caras de una familia y las mete en el catálogo.
+/// Devuelve true si al menos la normal cargó.
+pub(super) fn cargar_familia(
+    ctx: &mut RenderContext,
+    id: FamiliaId,
+    familia: &crate::fuentes_ttf::Familia,
+) -> bool {
+    let normal = std::fs::read(&familia.normal)
+        .ok()
+        .is_some_and(|b| ctx.cargar_cara(id, false, &b).is_ok());
+    if let Some(ruta) = &familia.bold
+        && let Ok(b) = std::fs::read(ruta)
+    {
+        // Si la negrita falla, la cadena de respaldo cae a la normal.
+        _ = ctx.cargar_cara(id, true, &b);
+    }
+    normal
 }
 
 #[cfg(test)]

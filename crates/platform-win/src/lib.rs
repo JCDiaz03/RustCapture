@@ -9,6 +9,7 @@ pub mod bar;
 pub mod clipboard;
 pub mod dpi;
 pub mod editor;
+mod fuentes_ttf;
 pub mod gdi;
 pub mod hotkeys;
 pub mod overlay;

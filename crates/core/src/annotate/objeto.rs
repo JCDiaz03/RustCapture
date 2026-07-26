@@ -176,7 +176,7 @@ desde! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::annotate::style::{CensorMode, Color, Style, TextStyle};
+    use crate::annotate::style::{CensorMode, Color, FamiliaId, Style, TextStyle};
 
     const ESTILO: Style = Style {
         color: Color::rgb(255, 0, 0),
@@ -203,7 +203,7 @@ mod tests {
             TextAnnotation {
                 pos: (12, 14),
                 text: "Hola".to_string(),
-                style: TextStyle { color: Color::rgb(9, 9, 9), size: 18.0, bold: false },
+                style: TextStyle { color: Color::rgb(9, 9, 9), size: 18.0, bold: false, familia: FamiliaId::default() },
             }
             .into(),
         ]
@@ -253,7 +253,7 @@ mod tests {
             TextAnnotation {
                 pos: (40, 40),
                 text: "Ag".to_string(),
-                style: TextStyle { color: Color::rgb(255, 0, 0), size: 28.0, bold: true },
+                style: TextStyle { color: Color::rgb(255, 0, 0), size: 28.0, bold: true, familia: FamiliaId::default() },
             }
             .into(),
         ];
@@ -419,7 +419,7 @@ mod tests {
         let o: Objeto = TextAnnotation {
             pos: (12, 14),
             text: "Hola".to_string(),
-            style: TextStyle { color: Color::rgb(9, 9, 9), size: 18.0, bold: false },
+            style: TextStyle { color: Color::rgb(9, 9, 9), size: 18.0, bold: false, familia: FamiliaId::default() },
         }
         .into();
         assert!(o.bounds(&RenderContext::sin_fuente()).is_empty());

@@ -23,7 +23,8 @@ use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, CreatePen, CreateSolidBrush, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, DeleteObject,
     DrawTextW, Ellipse, EndPaint, HALFTONE, HBRUSH, HDC, InvalidateRect, PAINTSTRUCT, PS_SOLID,
-    SRCCOPY, SelectObject, SetBkMode, SetStretchBltMode, SetTextColor, StretchBlt, TRANSPARENT,
+    SRCCOPY, SelectObject, SetBkColor, SetBkMode, SetStretchBltMode, SetTextColor, StretchBlt,
+    TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::DRAWITEMSTRUCT;
@@ -95,15 +96,16 @@ impl OutputSink for EditorSink {
 }
 
 /// Abre el editor con la captura y bloquea el hilo de UI hasta cerrarlo.
-pub fn show_editor(frame: Frame) {
+/// `familia` es la tipografía por defecto del texto (`[text].familia`).
+pub fn show_editor(frame: Frame, familia: &str) {
     EDITOR_ABIERTO.store(true, Ordering::SeqCst);
-    if let Err(e) = run(frame) {
+    if let Err(e) = run(frame, familia) {
         crate::alerts::error_box("RustCapture Editor", &e.to_string());
     }
     EDITOR_ABIERTO.store(false, Ordering::SeqCst);
 }
 
-fn run(frame: Frame) -> windows::core::Result<()> {
+fn run(frame: Frame, familia: &str) -> windows::core::Result<()> {
     let titulo = wide(&format!(
         "Captura {}×{} — RustCapture",
         frame.width, frame.height
@@ -112,7 +114,7 @@ fn run(frame: Frame) -> windows::core::Result<()> {
     let win_w = (frame.width as i32 + 60).clamp(720, 1280);
     let win_h = (frame.height as i32 + 190).clamp(430, 840);
 
-    let state_ptr = Box::into_raw(Box::new(EditorState::new(frame)?));
+    let state_ptr = Box::into_raw(Box::new(EditorState::con_fuente(frame, familia)?));
 
     // SAFETY: patrón del overlay: el estado lo posee esta función; la
     // ventana se destruye antes del Box::from_raw.
@@ -562,11 +564,14 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 let id = (wparam.0 & 0xFFFF) as u16;
                 let code = ((wparam.0 >> 16) & 0xFFFF) as u32;
                 if id == ID_EDIT_TEXT {
-                    if code == EN_KILLFOCUS
-                        && let Some(state) = state_mut(hwnd)
-                    {
-                        texto::commit_text(hwnd, state);
-                    }
+                    // A propósito NO se confirma con EN_KILLFOCUS: los menús
+                    // de los chips y el diálogo de color son MODALES, así que
+                    // le quitan el foco a la caja y confirmarla aquí la
+                    // cerraría justo cuando el usuario va a cambiarle el
+                    // estilo. Cerrar la caja lo cubren los demás caminos: un
+                    // clic fuera de los chips, cambiar de herramienta,
+                    // cualquier botón de la toolbar, Esc o abrir otra caja.
+                    _ = code;
                 } else {
                     on_command(hwnd, id);
                 }
@@ -575,16 +580,18 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             WM_LBUTTONDOWN => {
                 if let Some(state) = state_mut(hwnd) {
                     let p = punto(lparam);
-                    // Cualquier clic confirma la caja de texto abierta, sea
-                    // sobre otro objeto, en vacío o en la barra de
-                    // propiedades. No basta con EN_KILLFOCUS: pulsar en el
-                    // cliente del padre NO le quita el foco al EDIT hijo, así
-                    // que ese aviso no llega y la caja se quedaba abierta
-                    // mientras se manipulaba otro objeto.
-                    texto::commit_text(hwnd, state);
+                    // Los chips van PRIMERO y NO confirman la caja: su razón
+                    // de ser es cambiar el estilo de lo que estás escribiendo
+                    // (f.54), así que cerrarla sería justo lo contrario.
                     if props::on_click(hwnd, state, p) {
                         return LRESULT(0);
                     }
+                    // Cualquier OTRO clic sí la confirma. No basta con
+                    // EN_KILLFOCUS: pulsar en el cliente del padre NO le
+                    // quita el foco al EDIT hijo, así que ese aviso no llega
+                    // y la caja se quedaba abierta mientras se manipulaba
+                    // otro objeto.
+                    texto::commit_text(hwnd, state);
                     let destino = dest_rect(hwnd, state);
                     let tam = (state.committed.width, state.committed.height);
                     if let Some(pf) = math::view_to_frame(p, destino, tam) {
@@ -635,6 +642,20 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     }
                 }
                 LRESULT(0)
+            }
+            WM_CTLCOLOREDIT => {
+                // El color del chip tiene que verse mientras escribes, no
+                // solo al confirmar. Un EDIT solo colorea su texto por aquí.
+                if let Some(state) = state_mut(hwnd) {
+                    let dc = HDC(wparam.0 as *mut _);
+                    let paleta = theme::actual().paleta();
+                    SetTextColor(dc, crate::util::colorref(state.props.color));
+                    SetBkColor(dc, paleta.superficie);
+                    // Brocha del tema, cacheada en el estado para no filtrar
+                    // una por cada repintado del control.
+                    return LRESULT(state.brocha_caja(paleta.superficie).0 as isize);
+                }
+                DefWindowProcW(hwnd, msg, wparam, lparam)
             }
             WM_LBUTTONDBLCLK => {
                 // Doble clic con Selección sobre un texto → reeditarlo.
@@ -1212,7 +1233,7 @@ mod tests {
 
         // Estado con un rectángulo colocado y seleccionado.
         let base = Frame::filled(lado, lado, [0, 0, 0, 255]);
-        let mut state = EditorState::new(base).expect("estado");
+        let mut state = EditorState::con_fuente(base, "Segoe UI").expect("estado");
         state.herramienta = math::Herramienta::Seleccion;
         let objeto: rustcapture_core::annotate::Objeto =
             rustcapture_core::annotate::annotations::RectAnnotation {
@@ -1265,6 +1286,53 @@ mod tests {
             pixeles_asa > 20,
             "el asa de rotación solo pintó {pixeles_asa} píxeles en {asa:?}"
         );
+    }
+
+    /// La banda de propiedades tiene que producir CUATRO zonas clicables con
+    /// la herramienta Texto, la primera el chip de fuente con el nombre real
+    /// del catálogo. Comprueba lo que `chips` compone Y lo que `pintar` mide:
+    /// una etiqueta vacía daría una zona de ancho 0, invisible e impulsable.
+    #[test]
+    fn la_banda_de_propiedades_pinta_el_chip_de_fuente() {
+        let screen = ScreenDc::get().expect("DC de pantalla");
+        let mem = MemDc::compatible_with(&screen).expect("DC de memoria");
+        let mut dib = Dib::new_32bpp(&mem, 400, 40).expect("DIB");
+        dib.bits_mut().fill(0);
+        let sel = Selected::bitmap(&mem, &dib).expect("seleccionar DIB");
+
+        let mut state =
+            EditorState::con_fuente(Frame::filled(60, 60, [0, 0, 0, 255]), "Segoe UI")
+                .expect("estado");
+        state.herramienta = math::Herramienta::Texto;
+        // El catálogo del sistema tiene que haber dado nombre a la familia 0.
+        let nombre = state.ctx.nombre(state.props.familia);
+        assert_eq!(nombre, Some("Segoe UI"), "la familia por defecto no cargó");
+
+        let banda = RECT {
+            left: 0,
+            top: 0,
+            right: 400,
+            bottom: 26,
+        };
+        let zonas = props::pintar(mem.0, banda, &state, Escala::nueva(96));
+        // SAFETY: GDI debe terminar antes de soltar el DIB.
+        unsafe { _ = GdiFlush() };
+        drop(sel);
+
+        assert_eq!(zonas.len(), 4, "zonas: {zonas:?}");
+        // La primera es la fuente y tiene ancho real (si no, no se ve).
+        assert_eq!(zonas[0].1, props::Accion::MenuFuente);
+        let ancho = zonas[0].0.right - zonas[0].0.left;
+        assert!(ancho > 10, "el chip de fuente mide {ancho} px");
+        // Y las zonas no se solapan ni van en desorden.
+        for par in zonas.windows(2) {
+            assert!(
+                par[1].0.left >= par[0].0.right,
+                "chips solapados: {:?} y {:?}",
+                par[0],
+                par[1]
+            );
+        }
     }
 
     /// El asa de rotación tiene que quedar POR ENCIMA del recuadro y con el

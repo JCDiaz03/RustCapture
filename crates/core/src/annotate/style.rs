@@ -49,6 +49,15 @@ pub enum CensorMode {
     Blur { radius: u32 },
 }
 
+/// Familia tipográfica, como índice en el catálogo del `RenderContext`.
+///
+/// Es un `u16` y no un `String` a propósito: `TextStyle` viaja por valor por
+/// todo el motor (`draw_text`, `text_ink_box`, `draw_text_rotado`, el número
+/// de los pasos) y tiene que seguir siendo `Copy`. El nombre vive en el
+/// catálogo, que será también quien lo resuelva al serializar (f.31).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+pub struct FamiliaId(pub u16);
+
 /// Estilo del texto (f.22).
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct TextStyle {
@@ -56,6 +65,8 @@ pub struct TextStyle {
     /// Altura de la fuente en píxeles.
     pub size: f32,
     pub bold: bool,
+    /// Familia tipográfica (f.54); `FamiliaId::default()` = la de respaldo.
+    pub familia: FamiliaId,
 }
 
 #[cfg(test)]
