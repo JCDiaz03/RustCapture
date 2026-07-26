@@ -10,7 +10,7 @@
 
 ## 0. Estado general
 
-🔵 **Fase actual: F3 — Editor y anotación (adelantada por decisión de producto).** El ciclo capturar → editar → dibujar → guardar/copiar ya funciona (editor + ventana de dibujo operativos, D12); quedan las herramientas avanzadas, crop/resize, el formato re-editable y el resto de salidas. F1 completada; F2 en pausa (picking de ventana/objeto, mano alzada, región fija, scroll y f.7/f.19).
+🔵 **Fase actual: F3 — Editor y anotación (adelantada por decisión de producto).** El ciclo capturar → anotar in situ → guardar/copiar funciona en el editor V4 (F3.5 completada: rediseño visual con tema dual, iconos y fusión de la ventana de dibujo en el editor, D12+D13); quedan las herramientas avanzadas (pasos, leyenda, pixelado, goma), crop/resize, el formato re-editable y el resto de salidas. F1 completada; F2 en pausa (picking de ventana/objeto, mano alzada, región fija, scroll y f.7/f.19).
 
 ## 1. F0 — Diseño y preparación del entorno
 
@@ -45,14 +45,27 @@ Objetivo: capturar y sacar por portapapeles/archivo desde barra, hotkey y CLI. P
 
 ## 4. F3 — Editor y anotación (D5 + D6 + D12)
 
-- ✅ Slice A — Editor shell (f.21): captura → ventana de editor (Guardar como/Copiar/Draw/Cerrar), barra auto-oculta, destino "editor" por defecto.
-- ✅ Slice C — Ventana de dibujo (Ventana2): paleta sobre el motor de anotación, texto in situ, OK hornea y marca el editor como editado.
-- ✅ Modelo de documento: objetos `Annotation`, Strategy y `Canvas` sobre frame RGBA (D5); la paleta de la ventana de dibujo hace de Factory.
-- ✅ Command pattern con undo/redo (D6).
-- 🔵 Herramientas (motor en core): texto, flechas, líneas, formas, resaltado y lápiz hechos; pasos numerados, leyendas y pixelado pendientes; goma = eliminar objeto (llega con la UI del Slice C).
+- ✅ Slice A — Editor shell (f.21): captura → ventana de editor, barra auto-oculta, destino "editor" por defecto.
+- ✅ Slice C — Motor de anotación con UI (histórico: nació como ventana de dibujo/Ventana2; F3.5/S6 la fusionó dentro del editor).
+- ✅ Modelo de documento: objetos `Annotation`, Strategy y `Canvas` sobre frame RGBA (D5); la toolbar del editor hace de Factory.
+- ✅ Command pattern con undo/redo (D6); sobrevive al guardado (hornear bajo demanda, D12).
+- 🔵 Herramientas (motor en core): texto, flechas, líneas, formas, resaltado y lápiz hechos e integrados en el editor; pasos numerados, leyendas y pixelado pendientes; goma = eliminar objeto (pendiente con la selección).
 - ⏳ Recorte, redimensionado, nitidez, marca de agua, efectos de borde (f.26, f.28-f.30).
 - ⏳ Formato propio re-editable: PNG base + JSON de objetos en contenedor zip (f.31).
 - ⏳ Resto de salidas: impresora, email, editor externo; WebP, BMP, GIF, TIFF, PDF (f.42-f.45).
+
+## 4b. F3.5 — Rediseño visual V4 (D13)
+
+Integración del diseño de `design/` (tokens de `diseno-frontend.md`) en toda la GUI existente.
+
+- ✅ S0 — Assets: iconos annotate-ellipse/annotate-pencil nuevos + tool `design/tools/genassets` (atlas A8 16-32 px con AA horneado, `.ico` multiresolución).
+- ✅ S1 — Infraestructura `platform-win/src/ui/`: tema claro/oscuro con autodetección, iconos tintados con caché, IconButton owner-draw (5 estados), tooltips, fuentes y layout en unidades lógicas; `dpi::Escala` + `WM_DPICHANGED`; sección `[theme]` en config.
+- ✅ S3 — Barra V4: fila de iconos 28×28 con asa, separadores, tooltips con hotkey, double buffering y tema en vivo.
+- ✅ S2 — Identidad: `.ico` embebido (build.rs + winresource), manifest comctl32 v6 + PMv2, perfil release (GUI ~1 MB), bandeja e iconos de ventana propios.
+- ✅ S4 — Lupa V3: caja compacta junto al cursor con flip, zoom 21×21 con píxel central en acento, `#RRGGBB · X, Y` y `sel W × H`; invalidación mínima del overlay (resuelto el PENDIENTE de rendimiento).
+- ✅ S5 — Editor V4 (chrome): toolbar de iconos, status bar, back buffer sin parpadeo, DWM dark, título con nombre de archivo.
+- ✅ S6 — Fusión: la ventana de dibujo desaparece; anotación in situ en el editor con property bar contextual (ver F3 Slice C).
+- ✅ S7 — Documentación (este cambio).
 
 ## 5. F4 — Overlay de anotación en captura (D10)
 
@@ -78,5 +91,9 @@ Resumen de `ideas.md` §2 Fase 2 → ver detalle allí:
 - ⏳ Escaneo desde escáner (WIA).
 - ⏳ Instalador opcional (Inno Setup / WiX).
 - ⏳ Editor de vídeo ampliado.
+- ⏳ Barra flotante: orientación vertical, estado colapsado y acoplado al borde con auto-ocultado (diseño V1 completo).
+- ⏳ Zoom Ctrl+rueda y pan del canvas del editor (la status bar ya muestra el % de encaje).
+- ⏳ Pestañas multi-captura del editor (diseño V4).
+- ⏳ Icono de bandeja monocromo theme-aware (`app-icon-tray.svg`).
 
 Descartes con su porqué → `ideas.md` §Descartado.

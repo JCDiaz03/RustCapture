@@ -42,6 +42,12 @@ Reglas de obligado cumplimiento para todo código que cruce la frontera con Wind
 - El adapter se testea sin hardware donde sea posible: extraer la lógica pura (conversiones BGRA→NV12, cálculo de regiones, nombres de dispositivo) a funciones sin `unsafe` y testear esas. Lo que exige pantalla/audio real queda en tests `#[ignore]` de humo, ejecutables a mano.
 - Los mocks de los puertos viven en `core`, no aquí (D2).
 
+## Gotchas verificados en este repo
+
+- **Loader (0xC0000139 antes de `main`):** no importar `GetWindowSubclass` — la `comctl32.dll` 5.82 de System32 exporta por nombre `SetWindowSubclass`/`DefSubclassProc`/`RemoveWindowSubclass` pero NO `GetWindowSubclass` (solo v6 con manifest). Patrón usado: estado del control en `GWLP_USERDATA` (`ui/boton.rs`). Diagnóstico: `dumpbin /imports` del exe contra `dumpbin /exports` de la DLL.
+- Ubicaciones sorpresa en `windows` 0.62: `InvalidateRect`/`RedrawWindow`/`RDW_*` en `Graphics::Gdi`; `TrackMouseEvent` en `UI::Input::KeyboardAndMouse`; `WM_MOUSELEAVE` y `DRAWITEMSTRUCT` en `UI::Controls`; el struct de tooltips es `TTTOOLINFOW`.
+- UI nueva: layout en unidades LÓGICAS + `dpi::Escala` al pintar; colores SIEMPRE de `ui/theme.rs` (nunca `GetSysColor` ni literales); iconos vía `ui/iconos` (atlas A8 tintado), nunca rasters propios.
+
 ## Al depurar interop
 
 Aplicar `systematic-debugging`: ante un HRESULT de error, buscar primero su significado exacto (código + facility) y qué precondición de la API se incumple; prohibido reordenar llamadas al azar. Frames negros o vacíos en captura: comprobar primero DPI awareness, apartment COM del hilo y formato de píxel antes de tocar el pipeline.

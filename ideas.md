@@ -10,7 +10,7 @@
 > - §2 Fase 2 son ideas diferidas sin comprometer; no mezclar con la versión 1. §Descartado conserva los "no" y su porqué.
 
 Proyecto: **RustCapture** — herramienta de captura estilo FastStone Capture (todo en uno, ligera, portable-first).
-Stack previsto: Rust + interop Win32 (`windows-rs`), UI mínima (egui o Win32 puro).
+Stack: Rust + interop Win32 (`windows-rs`), UI en Win32 puro pintada con GDI (tema claro/oscuro propio, iconos del set de `design/`).
 Prioridades: peso mínimo, consumo mínimo de recursos, eficiencia por encima del aspecto visual.
 Desarrollo: IA-first (Opus 4.8 / Fable 5).
 
