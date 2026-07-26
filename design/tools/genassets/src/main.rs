@@ -19,7 +19,7 @@ const TALLAS: [u32; 5] = [16, 20, 24, 28, 32];
 
 /// Inventario de iconos de esta fase, en el orden del enum generado.
 /// Añadir aquí (al final, para no invalidar índices) y regenerar.
-const ICONOS: [&str; 38] = [
+const ICONOS: [&str; 39] = [
     // Barra
     "sys-drag-handle",
     "capture-fullscreen",
@@ -60,6 +60,7 @@ const ICONOS: [&str; 38] = [
     "output-save",
     "output-save-as",
     "output-print",
+    "output-email",
 ];
 
 /// PNG del icono de app que entran en el .ico (lado, ¿se embebe como PNG?).
@@ -278,7 +279,7 @@ mod tests {
     fn el_enum_generado_lista_todos_los_iconos_en_orden() {
         let src = generar_atlas_rs();
         assert!(src.contains("SysDragHandle = 0,"));
-        assert!(src.contains(&format!("OutputPrint = {},", ICONOS.len() - 1)));
+        assert!(src.contains(&format!("OutputEmail = {},", ICONOS.len() - 1)));
         assert!(src.contains(&format!("NUM_ICONOS: usize = {};", ICONOS.len())));
     }
 

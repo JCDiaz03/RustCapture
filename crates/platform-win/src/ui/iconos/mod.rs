@@ -166,7 +166,7 @@ mod tests {
             assert!(m.iter().any(|&b| b > 0));
         }
         // El último icono del enum también resuelve dentro del blob.
-        let ultimo = mascara(Icono::OutputPrint, 16);
+        let ultimo = mascara(Icono::OutputEmail, 16);
         assert_eq!(ultimo.len(), 256);
         assert!(ultimo.iter().any(|&b| b > 0));
     }

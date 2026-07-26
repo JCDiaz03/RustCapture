@@ -100,6 +100,9 @@ pub(crate) fn resolver(modo: ThemeMode, sistema: Tema) -> Tema {
 
 // 0 = claro, 1 = oscuro; lo escribe refrescar() y lo lee actual().
 static ACTUAL: AtomicU8 = AtomicU8::new(0);
+// Último ThemeMode pasado a refrescar(): permite a ventanas que no ven
+// la config (editor) re-resolver el tema en WM_SETTINGCHANGE.
+static MODO: AtomicU8 = AtomicU8::new(0);
 
 /// Tema activo del proceso (lo último que fijó `refrescar`).
 pub(crate) fn actual() -> Tema {
@@ -113,9 +116,26 @@ pub(crate) fn actual() -> Tema {
 /// Relee el registro y resuelve con la preferencia de config. Llamar al
 /// arrancar y en cada `WM_SETTINGCHANGE` de tema; devuelve el tema vigente.
 pub(crate) fn refrescar(modo: ThemeMode) -> Tema {
+    MODO.store(
+        match modo {
+            ThemeMode::Auto => 0,
+            ThemeMode::Light => 1,
+            ThemeMode::Dark => 2,
+        },
+        Ordering::Relaxed,
+    );
     let tema = resolver(modo, tema_del_sistema(leer_apps_use_light_theme()));
     ACTUAL.store(tema.es_oscuro() as u8, Ordering::Relaxed);
     tema
+}
+
+/// `refrescar` con el último modo conocido (para wndprocs sin config).
+pub(crate) fn refrescar_con_modo_actual() -> Tema {
+    refrescar(match MODO.load(Ordering::Relaxed) {
+        1 => ThemeMode::Light,
+        2 => ThemeMode::Dark,
+        _ => ThemeMode::Auto,
+    })
 }
 
 fn leer_apps_use_light_theme() -> Option<u32> {
