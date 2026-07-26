@@ -1,0 +1,214 @@
+//! `IconButton`: BUTTON owner-draw reutilizable con icono tintado y
+//! estados normal / hover / pressed / deshabilitado / activo. El padre
+//! solo tiene que reenviar su `WM_DRAWITEM` a `pintar_drawitem`.
+
+use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Graphics::Gdi::{
+    CreateSolidBrush, DeleteObject, FillRect, GetStockObject, HBRUSH, InvalidateRect, NULL_PEN,
+    RoundRect, SelectObject,
+};
+use windows::Win32::UI::Controls::{DRAWITEMSTRUCT, ODS_DISABLED, ODS_SELECTED, WM_MOUSELEAVE};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    EnableWindow, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent,
+};
+use windows::Win32::UI::Shell::{DefSubclassProc, GetWindowSubclass, SetWindowSubclass};
+use windows::Win32::UI::WindowsAndMessaging::{
+    BS_OWNERDRAW, CreateWindowExW, HMENU, WINDOW_EX_STYLE, WINDOW_STYLE, WM_MOUSEMOVE,
+    WM_NCDESTROY, WS_CHILD, WS_VISIBLE,
+};
+use windows::core::{PCWSTR, Result, w};
+
+use crate::dpi::Escala;
+use crate::ui::iconos::{self, Icono};
+use crate::ui::layout::Caja;
+use crate::ui::theme;
+
+const ID_SUBCLASS: usize = 0xB070;
+
+/// Estado propio del botón; vive en un Box cuyo puntero viaja como
+/// refdata del subclass y se libera en WM_NCDESTROY.
+struct Estado {
+    icono: Icono,
+    hover: bool,
+    rastreando: bool,
+    /// Herramienta seleccionada: fondo acento + icono blanco.
+    activo: bool,
+    /// Tinte de grabación (#D83B01) en estado normal.
+    grabacion: bool,
+}
+
+pub(crate) struct Opciones {
+    pub icono: Icono,
+    pub habilitado: bool,
+    pub grabacion: bool,
+}
+
+/// Crea el BUTTON owner-draw en la caja física dada.
+pub(crate) fn crear(padre: HWND, id: u16, caja: Caja, opciones: Opciones) -> Result<HWND> {
+    // SAFETY: creación estándar de un hijo BUTTON; el Box de estado se
+    // adopta en el subclass y se libera en WM_NCDESTROY.
+    unsafe {
+        let hwnd = CreateWindowExW(
+            WINDOW_EX_STYLE::default(),
+            w!("BUTTON"),
+            PCWSTR::null(),
+            WS_CHILD | WS_VISIBLE | WINDOW_STYLE(BS_OWNERDRAW as u32),
+            caja.x,
+            caja.y,
+            caja.ancho,
+            caja.alto,
+            Some(padre),
+            Some(HMENU(id as usize as *mut _)),
+            None,
+            None,
+        )?;
+        let estado = Box::new(Estado {
+            icono: opciones.icono,
+            hover: false,
+            rastreando: false,
+            activo: false,
+            grabacion: opciones.grabacion,
+        });
+        _ = SetWindowSubclass(
+            hwnd,
+            Some(subclass),
+            ID_SUBCLASS,
+            Box::into_raw(estado) as usize,
+        );
+        if !opciones.habilitado {
+            _ = EnableWindow(hwnd, false);
+        }
+        Ok(hwnd)
+    }
+}
+
+/// Marca/desmarca el estado "herramienta activa" y repinta.
+pub(crate) fn set_activo(boton: HWND, activo: bool) {
+    if let Some(estado) = estado_de(boton) {
+        estado.activo = activo;
+        // SAFETY: invalidar un HWND vivo.
+        unsafe { _ = InvalidateRect(Some(boton), None, false) };
+    }
+}
+
+fn estado_de(boton: HWND) -> Option<&'static mut Estado> {
+    let mut refdata: usize = 0;
+    // SAFETY: consulta del refdata registrado por crear(); si el botón no
+    // es nuestro, devuelve FALSE y no se toca nada.
+    let ok = unsafe { GetWindowSubclass(boton, Some(subclass), ID_SUBCLASS, Some(&mut refdata)) };
+    // SAFETY: refdata es el Box<Estado> de crear(), vivo hasta WM_NCDESTROY;
+    // solo lo usa el hilo de UI.
+    (ok.as_bool() && refdata != 0).then(|| unsafe { &mut *(refdata as *mut Estado) })
+}
+
+/// Subclass: hover con TrackMouseEvent y liberación del estado.
+unsafe extern "system" fn subclass(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+    _id: usize,
+    refdata: usize,
+) -> LRESULT {
+    // SAFETY: refdata es el Box<Estado> registrado en crear(); los
+    // mensajes de un HWND llegan siempre por su hilo creador.
+    unsafe {
+        let estado = &mut *(refdata as *mut Estado);
+        match msg {
+            WM_MOUSEMOVE => {
+                if !estado.hover {
+                    estado.hover = true;
+                    _ = InvalidateRect(Some(hwnd), None, false);
+                }
+                if !estado.rastreando {
+                    let mut tme = TRACKMOUSEEVENT {
+                        cbSize: size_of::<TRACKMOUSEEVENT>() as u32,
+                        dwFlags: TME_LEAVE,
+                        hwndTrack: hwnd,
+                        dwHoverTime: 0,
+                    };
+                    estado.rastreando = TrackMouseEvent(&mut tme).is_ok();
+                }
+            }
+            WM_MOUSELEAVE => {
+                estado.hover = false;
+                estado.rastreando = false;
+                _ = InvalidateRect(Some(hwnd), None, false);
+            }
+            WM_NCDESTROY => {
+                let resultado = DefSubclassProc(hwnd, msg, wparam, lparam);
+                drop(Box::from_raw(refdata as *mut Estado));
+                return resultado;
+            }
+            _ => {}
+        }
+        DefSubclassProc(hwnd, msg, wparam, lparam)
+    }
+}
+
+/// Pinta un botón desde el `WM_DRAWITEM` del padre. Devuelve `false` si
+/// el control no es un IconButton (el padre debe seguir su camino).
+pub(crate) fn pintar_drawitem(dis: &DRAWITEMSTRUCT) -> bool {
+    let Some(estado) = estado_de(dis.hwndItem) else {
+        return false;
+    };
+    let paleta = theme::actual().paleta();
+    let escala = Escala::from_hwnd(dis.hwndItem);
+    let rc = dis.rcItem;
+    let pressed = (dis.itemState.0 & ODS_SELECTED.0) != 0;
+    let deshabilitado = (dis.itemState.0 & ODS_DISABLED.0) != 0;
+
+    // Fondo base = superficie del padre (el botón cubre todo su rect).
+    rellenar(dis, paleta.superficie);
+
+    // Fondo de estado con esquinas redondeadas (radio 4 lógico).
+    let fondo = if estado.activo {
+        Some(paleta.acento)
+    } else if pressed {
+        Some(paleta.pressed)
+    } else if estado.hover && !deshabilitado {
+        Some(paleta.hover)
+    } else {
+        None
+    };
+    if let Some(color) = fondo {
+        // SAFETY: DC del DRAWITEMSTRUCT válido durante el mensaje; brocha
+        // propia liberada aquí mismo; el pen NULL es de stock.
+        unsafe {
+            let brocha = CreateSolidBrush(color);
+            let pen_previo = SelectObject(dis.hDC, GetStockObject(NULL_PEN));
+            let brocha_previa = SelectObject(dis.hDC, brocha.into());
+            let radio = escala.px(8); // diámetro de la elipse de esquina
+            // NULL_PEN encoge 1 px el borde derecho/inferior; se compensa.
+            _ = RoundRect(dis.hDC, rc.left, rc.top, rc.right + 1, rc.bottom + 1, radio, radio);
+            SelectObject(dis.hDC, brocha_previa);
+            SelectObject(dis.hDC, pen_previo);
+            _ = DeleteObject(brocha.into());
+        }
+    }
+
+    let (color_icono, opacidad) = if estado.activo {
+        (COLORREF(0x00FFFFFF), iconos::OPACO)
+    } else if deshabilitado {
+        (paleta.texto, iconos::DESHABILITADO)
+    } else if estado.grabacion {
+        (paleta.grabacion, iconos::OPACO)
+    } else {
+        (paleta.texto, iconos::OPACO)
+    };
+    let talla = iconos::talla_para_dpi(escala.dpi());
+    let x = rc.left + (rc.right - rc.left - talla as i32) / 2;
+    let y = rc.top + (rc.bottom - rc.top - talla as i32) / 2;
+    _ = iconos::pintar(dis.hDC, estado.icono, talla, x, y, color_icono, opacidad);
+    true
+}
+
+fn rellenar(dis: &DRAWITEMSTRUCT, color: COLORREF) {
+    // SAFETY: DC y rect del DRAWITEMSTRUCT, válidos durante el mensaje;
+    // brocha propia liberada tras el FillRect.
+    unsafe {
+        let brocha: HBRUSH = CreateSolidBrush(color);
+        FillRect(dis.hDC, &dis.rcItem, brocha);
+        _ = DeleteObject(brocha.into());
+    }
+}

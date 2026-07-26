@@ -15,3 +15,4 @@ pub mod hotkeys;
 pub mod overlay;
 pub mod pixels;
 pub mod tray;
+pub(crate) mod ui;

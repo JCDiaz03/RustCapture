@@ -13,6 +13,24 @@ pub struct Config {
     pub output: OutputConfig,
     pub hotkeys: HotkeysConfig,
     pub capture: CaptureConfig,
+    pub theme: ThemeConfig,
+}
+
+/// Apariencia de la GUI: claro/oscuro o seguir al sistema.
+#[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug, Default)]
+#[serde(default)]
+pub struct ThemeConfig {
+    pub mode: ThemeMode,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ThemeMode {
+    /// Sigue el tema de aplicaciones de Windows.
+    #[default]
+    Auto,
+    Light,
+    Dark,
 }
 
 /// Parámetros de captura (f.17: retardo del botón/hotkey Delay).
@@ -266,6 +284,35 @@ mod tests {
         let config = Config::from_toml("[hotkeys]\nfullscreen = \"ctrl+f1\"\n").unwrap();
         assert_eq!(config.hotkeys.fullscreen, "ctrl+f1");
         assert_eq!(config.hotkeys.window, "alt+printscreen");
+    }
+
+    #[test]
+    fn el_tema_por_defecto_es_auto() {
+        assert_eq!(Config::default().theme.mode, ThemeMode::Auto);
+        assert_eq!(Config::from_toml("").unwrap().theme.mode, ThemeMode::Auto);
+    }
+
+    #[test]
+    fn el_tema_se_configura_en_toml_en_minusculas() {
+        let config = Config::from_toml("[theme]\nmode = \"dark\"\n").unwrap();
+        assert_eq!(config.theme.mode, ThemeMode::Dark);
+        let config = Config::from_toml("[theme]\nmode = \"light\"\n").unwrap();
+        assert_eq!(config.theme.mode, ThemeMode::Light);
+    }
+
+    #[test]
+    fn un_tema_desconocido_es_error() {
+        assert!(matches!(
+            Config::from_toml("[theme]\nmode = \"sepia\"\n").unwrap_err(),
+            ConfigError::Parse(_)
+        ));
+    }
+
+    #[test]
+    fn el_tema_sobrevive_la_ida_y_vuelta_por_toml() {
+        let mut config = Config::default();
+        config.theme.mode = ThemeMode::Dark;
+        assert_eq!(Config::from_toml(&config.to_toml()).unwrap(), config);
     }
 
     #[test]
