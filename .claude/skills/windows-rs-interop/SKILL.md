@@ -46,7 +46,7 @@ Reglas de obligado cumplimiento para todo código que cruce la frontera con Wind
 
 - **Loader (0xC0000139 antes de `main`):** no importar `GetWindowSubclass` — la `comctl32.dll` 5.82 de System32 exporta por nombre `SetWindowSubclass`/`DefSubclassProc`/`RemoveWindowSubclass` pero NO `GetWindowSubclass` (solo v6 con manifest). Patrón usado: estado del control en `GWLP_USERDATA` (`ui/boton.rs`). Diagnóstico: `dumpbin /imports` del exe contra `dumpbin /exports` de la DLL.
 - Ubicaciones sorpresa en `windows` 0.62: `InvalidateRect`/`RedrawWindow`/`RDW_*` en `Graphics::Gdi`; `TrackMouseEvent` en `UI::Input::KeyboardAndMouse`; `WM_MOUSELEAVE` y `DRAWITEMSTRUCT` en `UI::Controls`; el struct de tooltips es `TTTOOLINFOW`.
-- UI nueva: layout en unidades LÓGICAS + `dpi::Escala` al pintar; colores SIEMPRE de `ui/theme.rs` (nunca `GetSysColor` ni literales); iconos vía `ui/iconos` (atlas A8 tintado), nunca rasters propios.
+- UI nueva: layout en unidades LÓGICAS + `dpi::Escala` al pintar; colores SIEMPRE de `ui/theme.rs` (nunca `GetSysColor` ni literales); iconos vía `ui/iconos` (atlas A8 tintado), nunca rasters propios; botoneras vía `ui/botonera` (componer la fila en un `math.rs` testeado); pintado sin parpadeo vía `ui/lienzo::BackBuffer` + `rellenar`/`marco`; estado de ventana y cambio de tema vía `ui/ventana`; `punto`/`wide` de `util.rs` — no redefinirlas.
 
 ## Al depurar interop
 

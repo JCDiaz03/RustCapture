@@ -11,7 +11,7 @@
 
 1. **Eficiencia sobre estética.** La UI es una herramienta, no un producto visual. Cero animaciones decorativas, cero degradados, cero sombras difusas costosas de renderizar.
 2. **Densidad funcional.** Estilo utilitario tipo FastStone/Greenshot: botones compactos, tooltips con el hotkey, todo a un clic.
-3. **Ligereza técnica.** UI en modo inmediato (egui) o Win32 puro → sin imágenes bitmap decorativas; toda la iconografía es vectorial monocroma tintable en runtime.
+3. **Ligereza técnica.** UI en Win32 puro pintada con GDI (decisión ratificada, D11/D13) → sin imágenes bitmap decorativas; toda la iconografía es vectorial monocroma tintable en runtime.
 4. **DPI-aware per-monitor** (f.6): todo se define en unidades lógicas; los iconos deben ser nítidos a 100/125/150/200 %.
 5. **Tema claro y oscuro** con la misma geometría; solo cambian los tintes.
 6. **Teclado primero:** cada acción visible muestra su hotkey; la UI es la vía secundaria (f.3).
@@ -96,4 +96,4 @@ Total: ~50 iconos + icono de aplicación (+ `annotate-ellipse` y `annotate-penci
 2. Set completo de iconos §4 como SVG individuales `currentColor`, sobre la rejilla y trazo especificados, con nombre de archivo = acción (`capture-region.svg`, `annotate-arrow.svg`...).
 3. Icono de aplicación en los tamaños listados + variante bandeja.
 4. Hoja de tokens (colores, tamaños, espaciados de §2) como referencia única.
-5. Restricción global: nada que no pueda reproducirse en egui/Win32 con rectángulos, texto y paths — sin blur, sin transparencias complejas, sin imágenes raster.
+5. Restricción global: nada que no pueda reproducirse en Win32/GDI con rectángulos, texto y paths — sin blur, sin transparencias complejas, sin imágenes raster.

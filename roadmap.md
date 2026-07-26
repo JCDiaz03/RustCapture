@@ -65,7 +65,8 @@ Integración del diseño de `design/` (tokens de `diseno-frontend.md`) en toda l
 - ✅ S4 — Lupa V3: caja compacta junto al cursor con flip, zoom 21×21 con píxel central en acento, `#RRGGBB · X, Y` y `sel W × H`; invalidación mínima del overlay (resuelto el PENDIENTE de rendimiento).
 - ✅ S5 — Editor V4 (chrome): toolbar de iconos, status bar, back buffer sin parpadeo, DWM dark, título con nombre de archivo.
 - ✅ S6 — Fusión: la ventana de dibujo desaparece; anotación in situ en el editor con property bar contextual (ver F3 Slice C).
-- ✅ S7 — Documentación (este cambio).
+- ✅ S7 — Documentación.
+- ✅ Consolidación post-fusión: `ui/botonera`, `ui/lienzo` (BackBuffer), `ui/ventana` y `util` extraen la duplicación que dejó el rediseño; comportamiento intacto.
 
 ## 5. F4 — Overlay de anotación en captura (D10)
 
