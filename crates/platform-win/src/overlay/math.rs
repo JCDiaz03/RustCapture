@@ -2,14 +2,15 @@
 
 use rustcapture_core::ports::Rect;
 
-pub(crate) const LUPA_SRC: i32 = 60;
-pub(crate) const LUPA_W: i32 = 300;
-pub(crate) const LUPA_ZOOM_H: i32 = 300;
-pub(crate) const LUPA_COORD_H: i32 = 30;
-pub(crate) const LUPA_HELP_H: i32 = 170;
-pub(crate) const LUPA_H: i32 = LUPA_ZOOM_H + LUPA_COORD_H + LUPA_HELP_H;
-const MARGEN: i32 = 20;
-const ZONA_SALTO: i32 = 40;
+/// Lado (impar) de la fuente del zoom: el píxel del cursor queda en la
+/// celda central exacta.
+pub(crate) const LUPA_SRC: i32 = 21;
+/// Lado LÓGICO de cada celda de zoom (≈6×).
+pub(crate) const LUPA_CELDA: i32 = 6;
+/// Alto LÓGICO del bloque de información (dos líneas de Consolas 10).
+pub(crate) const LUPA_INFO_H: i32 = 36;
+/// Separación LÓGICA de la caja respecto al cursor.
+pub(crate) const LUPA_OFFSET: i32 = 16;
 
 /// Rect normalizado entre dos puntos de arrastre; mínimo 1×1 (f.19).
 pub(crate) fn rect_between(a: (i32, i32), b: (i32, i32)) -> Rect {
@@ -21,7 +22,7 @@ pub(crate) fn rect_between(a: (i32, i32), b: (i32, i32)) -> Rect {
     )
 }
 
-/// Fuente del zoom: 60×60 centrado en el cursor, sin salirse del frame.
+/// Fuente del zoom: 21×21 centrado en el cursor, sin salirse del frame.
 pub(crate) fn lupa_source(cursor: (i32, i32), frame_w: u32, frame_h: u32) -> Rect {
     let max_x = (frame_w as i32 - LUPA_SRC).max(0);
     let max_y = (frame_h as i32 - LUPA_SRC).max(0);
@@ -33,22 +34,29 @@ pub(crate) fn lupa_source(cursor: (i32, i32), frame_w: u32, frame_h: u32) -> Rec
     )
 }
 
-/// Esquina de la caja de lupa: inferior-derecha del monitor; si el
-/// cursor entra en la caja inflada, salta a superior-izquierda.
-pub(crate) fn lupa_box_pos(monitor: Rect, cursor: (i32, i32)) -> (i32, i32) {
-    let br = (
-        monitor.right() as i32 - LUPA_W - MARGEN,
-        monitor.bottom() as i32 - LUPA_H - MARGEN,
-    );
-    let dentro = cursor.0 >= br.0 - ZONA_SALTO
-        && cursor.0 < br.0 + LUPA_W + ZONA_SALTO
-        && cursor.1 >= br.1 - ZONA_SALTO
-        && cursor.1 < br.1 + LUPA_H + ZONA_SALTO;
-    if dentro {
-        (monitor.x + MARGEN, monitor.y + MARGEN)
-    } else {
-        br
+/// Esquina de la caja de lupa: junto al cursor con `offset`, con FLIP al
+/// otro lado cuando no cabe hacia la derecha/abajo del monitor. Todo en
+/// px físicos (el llamador ya escaló caja y offset).
+pub(crate) fn lupa_box_pos(
+    monitor: Rect,
+    cursor: (i32, i32),
+    caja: (i32, i32),
+    offset: i32,
+) -> (i32, i32) {
+    let mut x = cursor.0 + offset;
+    if x + caja.0 > monitor.right() as i32 {
+        x = cursor.0 - offset - caja.0;
     }
+    let mut y = cursor.1 + offset;
+    if y + caja.1 > monitor.bottom() as i32 {
+        y = cursor.1 - offset - caja.1;
+    }
+    (x.max(monitor.x), y.max(monitor.y))
+}
+
+/// Color de un píxel BGRA como `#RRGGBB` (lo que muestra la lupa).
+pub(crate) fn hex_de_bgra(b: u8, g: u8, r: u8) -> String {
+    format!("#{r:02X}{g:02X}{b:02X}")
 }
 
 #[cfg(test)]
@@ -70,44 +78,88 @@ mod tests {
     }
 
     #[test]
-    fn lupa_source_centra_sobre_el_cursor() {
+    fn lupa_source_centra_el_cursor_en_la_celda_central() {
+        // 21 de lado → el cursor queda en la celda 10 (la central).
         assert_eq!(
             lupa_source((100, 100), 1920, 1080),
-            Rect::new(70, 70, 60, 60)
+            Rect::new(90, 90, 21, 21)
         );
     }
 
     #[test]
     fn lupa_source_clampa_en_las_esquinas() {
-        assert_eq!(lupa_source((0, 0), 1920, 1080), Rect::new(0, 0, 60, 60));
+        assert_eq!(lupa_source((0, 0), 1920, 1080), Rect::new(0, 0, 21, 21));
         assert_eq!(
             lupa_source((1919, 1079), 1920, 1080),
-            Rect::new(1860, 1020, 60, 60)
+            Rect::new(1899, 1059, 21, 21)
         );
     }
 
+    const CAJA: (i32, i32) = (126, 162);
+    const OFFSET: i32 = 16;
+
     #[test]
-    fn lupa_box_va_a_la_esquina_inferior_derecha() {
+    fn lupa_box_va_junto_al_cursor() {
         let monitor = Rect::new(0, 0, 1920, 1080);
         assert_eq!(
-            lupa_box_pos(monitor, (100, 100)),
-            (1920 - 300 - 20, 1080 - 500 - 20)
+            lupa_box_pos(monitor, (100, 100), CAJA, OFFSET),
+            (116, 116)
         );
     }
 
     #[test]
-    fn lupa_box_salta_cuando_el_cursor_se_acerca() {
+    fn lupa_box_flipa_en_horizontal_cerca_del_borde_derecho() {
         let monitor = Rect::new(0, 0, 1920, 1080);
-        // Cursor dentro de la zona de la caja (esquina inferior derecha).
-        assert_eq!(lupa_box_pos(monitor, (1700, 900)), (20, 20));
+        assert_eq!(
+            lupa_box_pos(monitor, (1850, 100), CAJA, OFFSET),
+            (1850 - 16 - 126, 116)
+        );
+    }
+
+    #[test]
+    fn lupa_box_flipa_en_vertical_cerca_del_borde_inferior() {
+        let monitor = Rect::new(0, 0, 1920, 1080);
+        assert_eq!(
+            lupa_box_pos(monitor, (100, 1000), CAJA, OFFSET),
+            (116, 1000 - 16 - 162)
+        );
+    }
+
+    #[test]
+    fn lupa_box_flipa_en_ambos_ejes_en_la_esquina() {
+        let monitor = Rect::new(0, 0, 1920, 1080);
+        assert_eq!(
+            lupa_box_pos(monitor, (1900, 1060), CAJA, OFFSET),
+            (1900 - 16 - 126, 1060 - 16 - 162)
+        );
+    }
+
+    #[test]
+    fn lupa_box_no_se_sale_por_arriba_izquierda_al_flipar() {
+        // Monitor diminuto: el flip horizontal daría x negativa (120-16-126)
+        // → clamp al origen del monitor.
+        let monitor = Rect::new(0, 0, 200, 200);
+        assert_eq!(lupa_box_pos(monitor, (120, 190), CAJA, OFFSET), (0, 12));
     }
 
     #[test]
     fn lupa_box_respeta_monitores_con_origen_negativo() {
         let monitor = Rect::new(-1920, 0, 1920, 1080);
         assert_eq!(
-            lupa_box_pos(monitor, (-1800, 100)),
-            (-1920 + 1920 - 300 - 20, 1080 - 500 - 20)
+            lupa_box_pos(monitor, (-1800, 100), CAJA, OFFSET),
+            (-1784, 116)
         );
+        // Pegado al borde derecho del monitor izquierdo (x = 0): flip.
+        assert_eq!(
+            lupa_box_pos(monitor, (-50, 100), CAJA, OFFSET),
+            (-50 - 16 - 126, 116)
+        );
+    }
+
+    #[test]
+    fn el_hex_va_en_orden_rgb_y_mayusculas() {
+        assert_eq!(hex_de_bgra(0xAB, 0x7D, 0x4A), "#4A7DAB");
+        assert_eq!(hex_de_bgra(0, 0, 0), "#000000");
+        assert_eq!(hex_de_bgra(255, 255, 255), "#FFFFFF");
     }
 }

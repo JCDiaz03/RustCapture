@@ -8,22 +8,22 @@
 pub(crate) mod math;
 
 use rustcapture_core::ports::{Rect, ScreenSource};
-use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, BitBlt, CLIP_DEFAULT_PRECIS, COLOR_BTNFACE, COLORONCOLOR, CreateFontW,
-    CreateSolidBrush, DEFAULT_CHARSET, DEFAULT_PITCH, DEFAULT_QUALITY, DT_CENTER, DeleteObject,
-    DrawTextW, EndPaint, FW_BOLD, FillRect, FrameRect, GetMonitorInfoW, GetSysColorBrush, HDC,
-    InvalidateRect, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, OUT_DEFAULT_PRECIS,
-    PAINTSTRUCT, SRCCOPY, SelectObject, SetBkMode, SetStretchBltMode, SetTextColor, StretchBlt,
-    TRANSPARENT,
+    BeginPaint, BitBlt, COLORONCOLOR, CreateSolidBrush, DT_NOPREFIX, DeleteObject, DrawTextW,
+    EndPaint, FillRect, FrameRect, GetMonitorInfoW, HDC, InvalidateRect,
+    MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, PAINTSTRUCT, SRCCOPY, SelectObject,
+    SetBkMode, SetStretchBltMode, SetTextColor, StretchBlt, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, VK_ESCAPE};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::w;
 
+use crate::dpi::Escala;
 use crate::gdi::GdiScreenSource;
 use crate::gdi::raii::{Dib, MemDc, ScreenDc, Selected};
+use crate::ui::{fuentes, theme};
 
 /// Estado del overlay; lo posee `select_region`, el wndproc solo lo usa.
 struct OverlayState {
@@ -41,6 +41,10 @@ struct OverlayState {
     /// None = en curso; Some(None) = cancelado; Some(Some(r)) = elegido
     /// (coordenadas LOCALES; `select_region` las traduce a escritorio).
     outcome: Option<Option<Rect>>,
+    /// Última zona pintada de la caja de lupa: invalidación mínima.
+    zona_lupa_previa: Option<RECT>,
+    /// Última selección pintada: invalidación mínima durante el arrastre.
+    sel_previa: Option<Rect>,
 }
 
 /// Selección interactiva. Bloquea el hilo de UI hasta soltar el botón o
@@ -109,6 +113,8 @@ fn run() -> windows::core::Result<Option<Rect>> {
         cursor: (0, 0),
         cursor_cruz: crear_cursor_cruz(),
         outcome: None,
+        zona_lupa_previa: None,
+        sel_previa: None,
     });
     drop(dc);
     drop(screen);
@@ -209,13 +215,31 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             }
             WM_MOUSEMOVE => {
                 if let Some(state) = state_mut(hwnd) {
+                    // Invalidación mínima: la escena es estática salvo la
+                    // caja de lupa y la selección; se invalida la unión
+                    // de sus zonas vieja y nueva (BeginPaint recorta los
+                    // blits del back buffer a esa región).
+                    let escala = Escala::from_hwnd(hwnd);
+                    let lupa_previa = state.zona_lupa_previa;
+                    let sel_previa = state.sel_previa;
                     state.cursor = punto(lparam);
-                    // PENDIENTE(rendimiento): se invalida el escritorio
-                    // virtual COMPLETO por movimiento (2 blits fullscreen
-                    // por frame). Si en multi-monitor 4K se nota lag,
-                    // invalidar solo la unión de selección vieja/nueva +
-                    // caja de lupa vieja/nueva.
-                    _ = InvalidateRect(Some(hwnd), None, false);
+                    let lupa = zona_lupa(state, escala);
+                    let sel = state.drag_start.map(|s| math::rect_between(s, state.cursor));
+                    for zona in [lupa_previa, Some(lupa)].into_iter().flatten() {
+                        _ = InvalidateRect(Some(hwnd), Some(&zona), false);
+                    }
+                    for s in [sel_previa, sel].into_iter().flatten() {
+                        // +2: cubre el marco de 1 px pintado alrededor.
+                        let zona = RECT {
+                            left: s.x - 2,
+                            top: s.y - 2,
+                            right: s.x + s.width as i32 + 2,
+                            bottom: s.y + s.height as i32 + 2,
+                        };
+                        _ = InvalidateRect(Some(hwnd), Some(&zona), false);
+                    }
+                    state.zona_lupa_previa = Some(lupa);
+                    state.sel_previa = sel;
                 }
                 LRESULT(0)
             }
@@ -240,7 +264,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 let mut ps = PAINTSTRUCT::default();
                 let hdc = BeginPaint(hwnd, &mut ps);
                 if let Some(state) = state_mut(hwnd) {
-                    _ = pintar(hdc, state);
+                    _ = pintar(hdc, state, Escala::from_hwnd(hwnd));
                 }
                 _ = EndPaint(hwnd, &ps);
                 LRESULT(0)
@@ -251,7 +275,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
 }
 
 /// Compone la escena en el back buffer y la vuelca de un BitBlt.
-fn pintar(hdc: HDC, state: &mut OverlayState) -> windows::core::Result<()> {
+fn pintar(hdc: HDC, state: &mut OverlayState, escala: Escala) -> windows::core::Result<()> {
     let screen = ScreenDc::get()?;
     let back_dc = MemDc::compatible_with(&screen)?;
     let src_dc = MemDc::compatible_with(&screen)?;
@@ -291,18 +315,18 @@ fn pintar(hdc: HDC, state: &mut OverlayState) -> windows::core::Result<()> {
                 sel.y,
                 SRCCOPY,
             )?;
-            let rojo = CreateSolidBrush(COLORREF(0x0000FF));
+            let acento = CreateSolidBrush(theme::actual().paleta().acento);
             let marco = RECT {
                 left: sel.x - 1,
                 top: sel.y - 1,
                 right: sel.x + sel.width as i32 + 1,
                 bottom: sel.y + sel.height as i32 + 1,
             };
-            FrameRect(back_dc.0, &marco, rojo);
-            _ = DeleteObject(rojo.into());
+            FrameRect(back_dc.0, &marco, acento);
+            _ = DeleteObject(acento.into());
         }
         // 3. Caja de lupa.
-        pintar_lupa(&back_dc, &src_dc, state, seleccion)?;
+        pintar_lupa(&back_dc, &src_dc, state, seleccion, escala)?;
         // 4. Volcado único a pantalla.
         BitBlt(
             hdc,
@@ -319,20 +343,14 @@ fn pintar(hdc: HDC, state: &mut OverlayState) -> windows::core::Result<()> {
     Ok(())
 }
 
-/// Caja 300×500: zoom 5× (300×300) + coordenadas (300×30) + ayuda (300×170).
-fn pintar_lupa(
-    back_dc: &MemDc,
-    src_dc: &MemDc,
-    state: &OverlayState,
-    seleccion: Option<Rect>,
-) -> windows::core::Result<()> {
-    // Monitor del cursor, en coordenadas locales de la ventana.
+/// Monitor bajo el cursor, en coordenadas locales de la ventana.
+fn monitor_local(state: &OverlayState) -> Rect {
     let cursor_desktop = POINT {
         x: state.cursor.0 + state.origin.0,
         y: state.cursor.1 + state.origin.1,
     };
     // SAFETY: consultas de monitor sin precondiciones.
-    let monitor_local = unsafe {
+    unsafe {
         let monitor = MonitorFromPoint(cursor_desktop, MONITOR_DEFAULTTONEAREST);
         let mut info = MONITORINFO {
             cbSize: size_of::<MONITORINFO>() as u32,
@@ -348,13 +366,45 @@ fn pintar_lupa(
         } else {
             Rect::new(0, 0, state.width as u32, state.height as u32)
         }
-    };
-    let (bx, by) = math::lupa_box_pos(monitor_local, state.cursor);
+    }
+}
+
+/// Zona (px físicos, coordenadas locales) de la caja de la lupa para el
+/// cursor actual: rejilla de zoom + bloque de información debajo.
+fn zona_lupa(state: &OverlayState, escala: Escala) -> RECT {
+    let celda = escala.px(math::LUPA_CELDA).max(1);
+    let zoom = math::LUPA_SRC * celda;
+    let info = escala.px(math::LUPA_INFO_H);
+    let (bx, by) = math::lupa_box_pos(
+        monitor_local(state),
+        state.cursor,
+        (zoom, zoom + info),
+        escala.px(math::LUPA_OFFSET),
+    );
+    RECT { left: bx, top: by, right: bx + zoom, bottom: by + zoom + info }
+}
+
+/// Lupa V3: caja compacta junto al cursor (flip en bordes) con zoom
+/// 21×21 a ~6×, píxel central marcado en acento y dos líneas de info:
+/// `#RRGGBB · X, Y` y `sel W × H` durante el arrastre.
+fn pintar_lupa(
+    back_dc: &MemDc,
+    src_dc: &MemDc,
+    state: &OverlayState,
+    seleccion: Option<Rect>,
+    escala: Escala,
+) -> windows::core::Result<()> {
+    let paleta = theme::actual().paleta();
+    let celda = escala.px(math::LUPA_CELDA).max(1);
+    let zoom = math::LUPA_SRC * celda;
+    let caja = zona_lupa(state, escala);
+    let (bx, by) = (caja.left, caja.top);
     let fuente = math::lupa_source(state.cursor, state.width as u32, state.height as u32);
 
-    // SAFETY: DCs vivos; dibujo GDI estándar.
+    // SAFETY: DCs vivos; dibujo GDI estándar con brochas propias
+    // liberadas en la misma función.
     unsafe {
-        // Zoom 5× desde el frame original.
+        // Rejilla de zoom desde el frame original (píxeles nítidos).
         {
             let _o = Selected::bitmap(src_dc, &state.original)?;
             SetStretchBltMode(back_dc.0, COLORONCOLOR);
@@ -362,8 +412,8 @@ fn pintar_lupa(
                 back_dc.0,
                 bx,
                 by,
-                math::LUPA_W,
-                math::LUPA_ZOOM_H,
+                zoom,
+                zoom,
                 Some(src_dc.0),
                 fuente.x,
                 fuente.y,
@@ -372,119 +422,80 @@ fn pintar_lupa(
                 SRCCOPY,
             );
         }
-        // Cruz roja de 1 px centrada en el bloque 5×5 del píxel del
-        // cursor (coincide con el centro salvo clamping en bordes), y el
-        // propio píxel origen pintado en blanco.
-        const ZOOM: i32 = 5;
-        let px = bx + (state.cursor.0 - fuente.x) * ZOOM;
-        let py = by + (state.cursor.1 - fuente.y) * ZOOM;
-        let rojo = CreateSolidBrush(COLORREF(0x0000FF));
-        FillRect(
-            back_dc.0,
-            &RECT {
-                left: bx,
-                top: py + 2,
-                right: bx + math::LUPA_W,
-                bottom: py + 3,
-            },
-            rojo,
-        );
-        FillRect(
-            back_dc.0,
-            &RECT {
-                left: px + 2,
-                top: by,
-                right: px + 3,
-                bottom: by + math::LUPA_ZOOM_H,
-            },
-            rojo,
-        );
-        _ = DeleteObject(rojo.into());
-        let blanco = CreateSolidBrush(COLORREF(0x00FFFFFF));
-        FillRect(
-            back_dc.0,
-            &RECT {
-                left: px,
-                top: py,
-                right: px + ZOOM,
-                bottom: py + ZOOM,
-            },
-            blanco,
-        );
-        _ = DeleteObject(blanco.into());
+        // Píxel del cursor recuadrado en acento (doble marco = 2 px).
+        let px = bx + (state.cursor.0 - fuente.x) * celda;
+        let py = by + (state.cursor.1 - fuente.y) * celda;
+        let acento = CreateSolidBrush(paleta.acento);
+        for inflado in [1, 0] {
+            let marco = RECT {
+                left: px - inflado,
+                top: py - inflado,
+                right: px + celda + inflado,
+                bottom: py + celda + inflado,
+            };
+            FrameRect(back_dc.0, &marco, acento);
+        }
 
-        // Barra de coordenadas (gris claro).
-        let coord_rect = RECT {
+        // Bloque de información: hex + coordenadas y tamaño de selección.
+        let info_rect = RECT {
             left: bx,
-            top: by + math::LUPA_ZOOM_H,
-            right: bx + math::LUPA_W,
-            bottom: by + math::LUPA_ZOOM_H + math::LUPA_COORD_H,
+            top: by + zoom,
+            right: caja.right,
+            bottom: caja.bottom,
         };
-        FillRect(back_dc.0, &coord_rect, GetSysColorBrush(COLOR_BTNFACE));
+        let superficie = CreateSolidBrush(paleta.superficie);
+        FillRect(back_dc.0, &info_rect, superficie);
+        _ = DeleteObject(superficie.into());
+
+        let (b, g, r) = pixel_bajo_el_cursor(state);
+        let linea1 = format!(
+            "{} · {}, {}",
+            math::hex_de_bgra(b, g, r),
+            state.cursor.0 + state.origin.0,
+            state.cursor.1 + state.origin.1
+        );
+        let linea2 = seleccion
+            .map(|s| format!("sel {} × {}", s.width, s.height))
+            .unwrap_or_default();
+
         SetBkMode(back_dc.0, TRANSPARENT);
-        // Coordenadas en morado y negrita.
-        SetTextColor(back_dc.0, COLORREF(0x00800080));
-        let negrita = CreateFontW(
-            22,
-            0,
-            0,
-            0,
-            FW_BOLD.0 as i32,
-            0,
-            0,
-            0,
-            DEFAULT_CHARSET,
-            OUT_DEFAULT_PRECIS,
-            CLIP_DEFAULT_PRECIS,
-            DEFAULT_QUALITY,
-            DEFAULT_PITCH.0 as u32,
-            w!("Segoe UI"),
-        );
-        let fuente_anterior = SelectObject(back_dc.0, negrita.into());
-        let mut coords: Vec<u16> = format!("X, Y = {},{}", cursor_desktop.x, cursor_desktop.y)
-            .encode_utf16()
-            .collect();
-        let mut rc = coord_rect;
-        rc.top += 3;
-        DrawTextW(back_dc.0, &mut coords, &mut rc, DT_CENTER);
-        SelectObject(back_dc.0, fuente_anterior);
-        _ = DeleteObject(negrita.into());
-
-        // Bloque de ayuda (azul RGB(30,80,160), texto blanco).
-        let ayuda_rect = RECT {
-            left: bx,
-            top: by + math::LUPA_ZOOM_H + math::LUPA_COORD_H,
-            right: bx + math::LUPA_W,
-            bottom: by + math::LUPA_H,
-        };
-        let azul = CreateSolidBrush(COLORREF(0x00A0501E));
-        FillRect(back_dc.0, &ayuda_rect, azul);
-        _ = DeleteObject(azul.into());
-        SetTextColor(back_dc.0, COLORREF(0x00FFFFFF));
-        let ayuda = match seleccion {
-            Some(sel) => format!(
-                "Arrastra para seleccionar\nSuelta para capturar\nESC para cancelar\n\nSelección: {}×{} px",
-                sel.width, sel.height
-            ),
-            None => {
-                "Arrastra para seleccionar\nSuelta para capturar\nESC para cancelar".to_string()
+        SetTextColor(back_dc.0, paleta.texto);
+        let mono = fuentes::fuente(fuentes::Rol::Mono, escala);
+        let fuente_previa = SelectObject(back_dc.0, mono.into());
+        let margen = escala.px(6);
+        let alto_linea = (info_rect.bottom - info_rect.top) / 2;
+        for (i, texto) in [linea1, linea2].iter().enumerate() {
+            if texto.is_empty() {
+                continue;
             }
-        };
-        let mut ayuda: Vec<u16> = ayuda.encode_utf16().collect();
-        let mut rc = ayuda_rect;
-        rc.top += 24;
-        DrawTextW(back_dc.0, &mut ayuda, &mut rc, DT_CENTER);
+            let mut wide: Vec<u16> = texto.encode_utf16().collect();
+            let mut rc = RECT {
+                left: info_rect.left + margen,
+                top: info_rect.top + margen / 2 + i as i32 * alto_linea,
+                right: info_rect.right - margen,
+                bottom: info_rect.bottom,
+            };
+            DrawTextW(back_dc.0, &mut wide, &mut rc, DT_NOPREFIX);
+        }
+        SelectObject(back_dc.0, fuente_previa);
 
         // Marco exterior de la caja completa.
-        let caja = RECT {
-            left: bx,
-            top: by,
-            right: bx + math::LUPA_W,
-            bottom: by + math::LUPA_H,
-        };
-        let negro = CreateSolidBrush(COLORREF(0x000000));
-        FrameRect(back_dc.0, &caja, negro);
-        _ = DeleteObject(negro.into());
+        let borde = CreateSolidBrush(paleta.borde);
+        FrameRect(back_dc.0, &caja, borde);
+        _ = DeleteObject(borde.into());
+        _ = DeleteObject(acento.into());
     }
     Ok(())
+}
+
+/// BGRA del píxel del frame congelado bajo el cursor.
+fn pixel_bajo_el_cursor(state: &OverlayState) -> (u8, u8, u8) {
+    let x = state.cursor.0.clamp(0, state.width - 1) as usize;
+    let y = state.cursor.1.clamp(0, state.height - 1) as usize;
+    let bits = state.original.bits();
+    let i = (y * state.width as usize + x) * 4;
+    match bits.get(i..i + 3) {
+        Some([b, g, r]) => (*b, *g, *r),
+        _ => (0, 0, 0),
+    }
 }
