@@ -40,9 +40,9 @@ Objetivo: capturar y sacar por portapapeles/archivo desde barra, hotkey y CLI. P
 - ✅ Objeto de ventana y menús (f.11, f.12): instantánea del árbol de ventanas ANTES de congelar (por eso un menú desplegado sigue siendo señalable) y resaltado del rect más pequeño bajo el cursor.
 - ✅ Región fija (f.15): rect de tamaño de config siguiendo al cursor, ajustable con la rueda (Shift = solo ancho).
 - 🚫 Región a mano alzada (antigua f.14): descartada, ver `ideas.md` §Descartado.
-- ⏳ Scroll capture (f.16) — el módulo de mayor riesgo técnico de la fase; referencia: implementación de ShareX.
+- 🚫 Scroll capture (antigua f.16) y escritorios virtuales (antigua f.7): descartadas, ver `ideas.md` §Descartado.
 - ✅ Retardo/temporizador y repetir última captura (f.17, f.18).
-- ⏳ Escritorios virtuales y capturas diminutas (f.7, f.19).
+- ⏳ Interruptor de tamaño mínimo de captura (f.19): último ítem de la fase.
 
 ## 4. F3 — Editor y anotación (D5 + D6 + D12)
 
@@ -50,12 +50,12 @@ Objetivo: capturar y sacar por portapapeles/archivo desde barra, hotkey y CLI. P
 - ✅ Slice C — Motor de anotación con UI (histórico: nació como ventana de dibujo/Ventana2; F3.5/S6 la fusionó dentro del editor).
 - ✅ Modelo de documento: objetos `Annotation`, Strategy y `Canvas` sobre frame RGBA (D5); la toolbar del editor hace de Factory.
 - ✅ Command pattern con undo/redo (D6); sobrevive al guardado (hornear bajo demanda, D12).
-- 🔵 Herramientas (motor en core): texto, flechas, líneas, formas, resaltado, lápiz, pixelado/desenfoque, pasos numerados y goma hechos e integrados en el editor; leyendas pendientes.
+- ✅ Herramientas (motor en core): texto, flechas, líneas, formas, resaltado, lápiz, pixelado/desenfoque, pasos numerados y goma, todas integradas en el editor. 🚫 Leyendas (antigua f.24) descartada.
 - ✅ Selección, movimiento y reedición de objetos (f.52): `Objeto::bounds`/`translate`, `Document::hit_test` y Commands `Move`/`Replace` en el motor (D5+D6), y en el editor la herramienta Selección (clic elige, arrastre mueve, doble clic reedita un texto, marco punteado con 8 asas, Esc suelta) más la goma y Supr que borran el objeto (f.27).
 - ✅ Rotación de objetos (f.53): `Objeto { forma, giro }` con rasterizado girado en las nueve formas y `Command::Rotate`; asa redonda en el recuadro, arrastre circular y salto de 15° con Shift.
-- ⏳ Recorte, redimensionado, nitidez, marca de agua, efectos de borde (f.26, f.28-f.30).
+- ⏳ Recorte y redimensionado (f.26), marca de agua (f.29) y efectos de borde (f.30). 🚫 Nitidez (antigua f.28) descartada.
 - ✅ Formato propio re-editable `.rcap` (f.31): ZIP con la base en PNG y los objetos en TOML, con botón Abrir en el editor; cero dependencias nuevas.
-- ⏳ Resto de salidas: impresora, email, editor externo; WebP, BMP, GIF, TIFF, PDF (f.42-f.45).
+- ⏳ Resto de salidas: impresora, email, editor externo (f.42-f.44) y PDF, que se genera a mano envolviendo el JPEG con `/DCTDecode` sin dependencias (f.45). 🚫 WebP, BMP, GIF y TIFF descartados; el GIF sigue vivo como exportación de vídeo (f.39).
 
 ## 4c. F3.6 — Manipulación de objetos
 

@@ -25,7 +25,6 @@ Desarrollo: IA-first (Opus 4.8 / Fable 5).
 4. Portable-first: un único `.exe` estático, configuración en `config.toml` junto al ejecutable (o `%APPDATA%` si se detecta instalación). Instalador opcional en el futuro.
 5. Consumo casi nulo en reposo; arranque instantáneo.
 6. Soporte multi-monitor con DPI mixtos (per-monitor DPI awareness).
-7. Soporte para múltiples escritorios virtuales de Windows 10/11.
 8. Interfaz CLI: lanzar capturas desde línea de comandos o scripts (ej. `app.exe --region --clipboard`). *(Robo de Flameshot)*
 
 ### Modos de captura
@@ -36,10 +35,9 @@ Desarrollo: IA-first (Opus 4.8 / Fable 5).
 12. Menús desplegados.
 13. Región rectangular.
 15. Región fija (tamaño predefinido).
-16. Ventana / página con scroll (scroll capture automático).
 17. Captura con retardo (temporizador).
 18. Repetir última captura (misma región/modo).
-19. Permitir capturas diminutas (5×5 px o menos), configurable.
+19. Interruptor de tamaño mínimo de captura: activado, ignora las selecciones accidentales de pocos píxeles; desactivado, permite capturas diminutas de 5×5 px o menos. No es un modo de captura, es un ajuste del overlay.
 
 ### Anotación y edición
 
@@ -47,11 +45,9 @@ Desarrollo: IA-first (Opus 4.8 / Fable 5).
 21. Editor integrado: la captura aterriza en él sin pasos intermedios. Es el destino por defecto de las capturas de la GUI (la barra se oculta mientras el editor está abierto); portapapeles/archivo directos quedan como opción de config y como flujo de la CLI.
 22. Herramientas de anotación: texto, flechas, líneas, formas, resaltado.
 23. Herramienta de pasos numerados (1, 2, 3…).
-24. Leyendas/captions con estilos de borde.
 25. Pixelado / desenfoque para censurar información.
 26. Recorte y redimensionado.
 27. Goma de borrar: elimina objetos de anotación completos (un Command deshacible), no píxeles.
-28. Nitidez y ajustes básicos de color.
 29. Marca de agua.
 30. Efectos de borde (sombra, borde rasgado).
 31. Formato propio sin pérdida que conserva los objetos de anotación editables junto a la imagen (equivalente al `.fsc` de FastStone).
@@ -77,7 +73,7 @@ Desarrollo: IA-first (Opus 4.8 / Fable 5).
 42. Impresora.
 43. Email.
 44. Envío a editor externo configurable.
-45. Formatos de imagen: PNG, JPEG, WebP (con opción alta calidad), BMP, GIF, TIFF, PDF.
+45. Formatos de imagen: PNG y JPEG (con opción alta calidad); PDF si se puede generar sin dependencias externas.
 
 ### Utilidades
 
@@ -99,9 +95,16 @@ Desarrollo: IA-first (Opus 4.8 / Fable 5).
 
 ## Descartado (decisiones de diseño)
 
-- Región a mano alzada (antigua f.14, la tiene FastStone y la Herramienta de Recorte): trazar el lazo a pulso es incómodo y el resultado casi nunca es el que se quería, así que en la práctica se acaba usando la región rectangular. Además obliga a decidir con qué se rellena lo que queda fuera de la forma en cada salida (el portapapeles y el JPEG no tienen alfa). El número 14 queda libre y no se reutiliza (numeración append-only).
+Los números liberados no se reutilizan (numeración append-only).
 
-- Captura panorámica con cosido manual (Snagit): coste medio-alto (stitching en tiempo real) para un caso de nicho; el scroll capture automático cubre la necesidad principal.
+- Región a mano alzada (antigua f.14, la tiene FastStone y la Herramienta de Recorte): trazar el lazo a pulso es incómodo y el resultado casi nunca es el que se quería, así que en la práctica se acaba usando la región rectangular. Además obliga a decidir con qué se rellena lo que queda fuera de la forma en cada salida (el portapapeles y el JPEG no tienen alfa).
+- Scroll capture automático (antigua f.16): es el único punto del proyecto con incertidumbre técnica de verdad — hay que hacer scroll en una ventana ajena sin saber cómo la implementó su autor, detectar el final y coser fragmentos con solape desconocido. Alto coste para un resultado que solo funcionaría en parte de las aplicaciones. Con él cae también la justificación original de descartar la panorámica, así que ambas quedan fuera: el caso de «capturar algo más largo que la pantalla» no se cubre en la versión 1.
+- Captura panorámica con cosido manual (Snagit): coste medio-alto (stitching) para un caso de nicho.
+- Soporte explícito de escritorios virtuales (antigua f.7): estaba mal especificado y no se corresponde con un problema real — la barra y los hotkeys ya se comportan como toca al cambiar de escritorio, porque Windows lo gestiona por su cuenta. Queda como comprobación del guion manual, no como tarea.
+- Leyendas/captions con estilos de borde (antigua f.24): se solapa con la herramienta de texto, que ya permite fuente, tamaño, negrita y color; el bocadillo con borde aporta poco frente a un texto más una forma.
+- Nitidez y ajustes básicos de color (antigua f.28): filtros de edición de imagen en una herramienta cuyo trabajo es capturar y anotar. Quien necesite retocar tiene editores mejores, y f.44 (enviar a editor externo) cubre ese salto.
+- Formatos de imagen BMP, GIF y TIFF (parte de f.45): PNG cubre el sin pérdidas y JPEG el comprimido; los otros tres solo añaden superficie de mantenimiento. **El GIF se descarta como formato de captura de imagen, no de vídeo**: como animación tiene sentido y sigue vivo en f.39, la exportación desde el pipeline de grabación.
+- Formato WebP (parte de f.45): codificarlo exige un codificador VP8, que en la práctica significa una dependencia externa; va contra la prioridad de peso mínimo y no aporta nada que PNG o JPEG no cubran.
 - Subida a la nube, incluso acotada (FTP/SFTP + servicios): fuera del alcance del proyecto; las salidas locales (archivo, portapapeles, email) cubren el flujo.
 - Catálogo masivo de destinos de subida (ShareX): mantenimiento perpetuo de APIs y OAuth.
 - Sistema de plugins (Greenshot): API de plugins estable es un proyecto en sí; en Rust añade complejidad de ABI.
