@@ -11,10 +11,10 @@ use windows::Win32::UI::Controls::{DRAWITEMSTRUCT, ODS_DISABLED, ODS_SELECTED, W
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     EnableWindow, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent,
 };
-use windows::Win32::UI::Shell::{DefSubclassProc, GetWindowSubclass, SetWindowSubclass};
+use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
-    BS_OWNERDRAW, CreateWindowExW, HMENU, WINDOW_EX_STYLE, WINDOW_STYLE, WM_MOUSEMOVE,
-    WM_NCDESTROY, WS_CHILD, WS_VISIBLE,
+    BS_OWNERDRAW, CreateWindowExW, GWLP_USERDATA, GetWindowLongPtrW, HMENU, SetWindowLongPtrW,
+    WINDOW_EX_STYLE, WINDOW_STYLE, WM_MOUSEMOVE, WM_NCDESTROY, WS_CHILD, WS_VISIBLE,
 };
 use windows::core::{PCWSTR, Result, w};
 
@@ -25,8 +25,11 @@ use crate::ui::theme;
 
 const ID_SUBCLASS: usize = 0xB070;
 
-/// Estado propio del botón; vive en un Box cuyo puntero viaja como
-/// refdata del subclass y se libera en WM_NCDESTROY.
+/// Estado propio del botón; vive en un Box cuyo puntero se guarda en el
+/// GWLP_USERDATA del control (el BUTTON estándar no lo usa) y se libera
+/// en WM_NCDESTROY. No se usa el refdata del subclass a propósito:
+/// leerlo exigiría `GetWindowSubclass`, que comctl32 5.82 (la versión
+/// sin manifest) no exporta por nombre y rompe el arranque del exe.
 struct Estado {
     icono: Icono,
     hover: bool,
@@ -69,12 +72,8 @@ pub(crate) fn crear(padre: HWND, id: u16, caja: Caja, opciones: Opciones) -> Res
             activo: false,
             grabacion: opciones.grabacion,
         });
-        _ = SetWindowSubclass(
-            hwnd,
-            Some(subclass),
-            ID_SUBCLASS,
-            Box::into_raw(estado) as usize,
-        );
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, Box::into_raw(estado) as isize);
+        _ = SetWindowSubclass(hwnd, Some(subclass), ID_SUBCLASS, 0);
         if !opciones.habilitado {
             _ = EnableWindow(hwnd, false);
         }
@@ -92,13 +91,14 @@ pub(crate) fn set_activo(boton: HWND, activo: bool) {
 }
 
 fn estado_de(boton: HWND) -> Option<&'static mut Estado> {
-    let mut refdata: usize = 0;
-    // SAFETY: consulta del refdata registrado por crear(); si el botón no
-    // es nuestro, devuelve FALSE y no se toca nada.
-    let ok = unsafe { GetWindowSubclass(boton, Some(subclass), ID_SUBCLASS, Some(&mut refdata)) };
-    // SAFETY: refdata es el Box<Estado> de crear(), vivo hasta WM_NCDESTROY;
-    // solo lo usa el hilo de UI.
-    (ok.as_bool() && refdata != 0).then(|| unsafe { &mut *(refdata as *mut Estado) })
+    // SAFETY: el puntero lo puso crear() desde un Box válido y se anula
+    // antes de liberarse en WM_NCDESTROY; solo lo usa el hilo de UI.
+    // Nota: para un HWND que no sea un IconButton (p. ej. un BUTTON de
+    // otra ventana), GWLP_USERDATA vale 0 y devolvemos None.
+    unsafe {
+        let ptr = GetWindowLongPtrW(boton, GWLP_USERDATA) as *mut Estado;
+        ptr.as_mut()
+    }
 }
 
 /// Subclass: hover con TrackMouseEvent y liberación del estado.
@@ -108,12 +108,14 @@ unsafe extern "system" fn subclass(
     wparam: WPARAM,
     lparam: LPARAM,
     _id: usize,
-    refdata: usize,
+    _refdata: usize,
 ) -> LRESULT {
-    // SAFETY: refdata es el Box<Estado> registrado en crear(); los
+    // SAFETY: el estado vive en GWLP_USERDATA (ver crear()); los
     // mensajes de un HWND llegan siempre por su hilo creador.
     unsafe {
-        let estado = &mut *(refdata as *mut Estado);
+        let Some(estado) = estado_de(hwnd) else {
+            return DefSubclassProc(hwnd, msg, wparam, lparam);
+        };
         match msg {
             WM_MOUSEMOVE => {
                 if !estado.hover {
@@ -136,8 +138,11 @@ unsafe extern "system" fn subclass(
                 _ = InvalidateRect(Some(hwnd), None, false);
             }
             WM_NCDESTROY => {
+                let ptr = SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0) as *mut Estado;
                 let resultado = DefSubclassProc(hwnd, msg, wparam, lparam);
-                drop(Box::from_raw(refdata as *mut Estado));
+                if !ptr.is_null() {
+                    drop(Box::from_raw(ptr));
+                }
                 return resultado;
             }
             _ => {}

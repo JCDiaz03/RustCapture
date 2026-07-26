@@ -75,7 +75,13 @@ fn main() -> ExitCode {
 
     // La barra se crea ANTES del hilo orquestador: EditorSink necesita
     // su hwnd para publicar las capturas al hilo de UI.
-    let bar = match Bar::create(tx.clone(), destination, delay_ms) {
+    let bar = match Bar::create(
+        tx.clone(),
+        destination,
+        delay_ms,
+        config.hotkeys.clone(),
+        config.theme.mode,
+    ) {
         Ok(b) => b,
         Err(e) => {
             platform_win::alerts::error_box("RustCapture", &e);
