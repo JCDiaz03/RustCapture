@@ -1,18 +1,23 @@
-//! Editor V4 (f.21): la captura aterriza aquí. Toolbar de iconos (las
-//! herramientas de anotación esperan la fusión de S6; Draw abre la
-//! ventana de dibujo), canvas con la imagen encajada y barra de estado,
-//! todo pintado con el tema en un back buffer.
+//! Editor V4 (f.21): la captura aterriza aquí y se anota IN SITU con el
+//! motor del core (D5+D6) — toolbar de herramientas con la activa en
+//! acento, barra de propiedades contextual, canvas con preview en vivo,
+//! texto in situ y barra de estado. Guardar/Copiar hornean bajo demanda
+//! el documento sobre la base, así undo/redo sobrevive al guardado.
+//! (La antigua ventana de dibujo/Ventana2 vive fusionada aquí.)
 //!
 //! Hilos: `EditorSink::deliver` corre en el hilo orquestador y SOLO
 //! publica un mensaje; `show_editor` corre en el hilo de UI (bucle
 //! modal, patrón del overlay).
 
+mod estado;
 pub(crate) mod math;
+mod props;
+mod texto;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use rustcapture_core::output::{ImageFormat, encode};
-use rustcapture_core::ports::{Frame, OutputError, OutputSink};
+use rustcapture_core::ports::{Frame, OutputError, OutputSink, Rect};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     BeginPaint, BitBlt, CreateSolidBrush, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, DeleteObject,
@@ -23,15 +28,19 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::DRAWITEMSTRUCT;
 use windows::Win32::UI::Controls::Dialogs::{GetSaveFileNameW, OFN_OVERWRITEPROMPT, OPENFILENAMEW};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    EnableWindow, GetKeyState, ReleaseCapture, SetCapture, VK_CONTROL, VK_ESCAPE,
+};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{PCWSTR, w};
 
 use crate::dpi::{self, Escala};
-use crate::gdi::dib_from_frame;
 use crate::gdi::raii::{Dib, MemDc, ScreenDc, Selected};
 use crate::ui::{boton, fuentes, layout, theme, tooltip::Tooltips};
 
+use estado::{DragState, EditorState};
 use math::Elemento;
+use texto::{ID_EDIT_TEXT, WM_APP_CANCEL_TEXT};
 
 /// Mensaje al wndproc de la barra: wparam = `Box<Frame>` crudo, el
 /// receptor toma posesión SIEMPRE (también si decide no abrir).
@@ -40,7 +49,6 @@ pub(crate) const WM_APP_EDITOR: u32 = WM_APP + 3;
 /// Un editor cada vez (MVP sin tabs). Lo consulta el sink (hilo
 /// orquestador) y lo mantiene `show_editor` (hilo UI).
 static EDITOR_ABIERTO: AtomicBool = AtomicBool::new(false);
-
 
 /// `OutputSink` que entrega la captura al editor del hilo de UI.
 pub struct EditorSink {
@@ -84,20 +92,17 @@ impl OutputSink for EditorSink {
     }
 }
 
-struct EditorState {
-    frame: Frame,
-    dib: Dib,
-    cerrado: bool,
-    /// Hay ediciones (Draw con OK) sin guardar ni copiar.
-    dirty: bool,
-    /// Nombre del archivo tras Guardar como (título y status bar).
-    nombre: Option<String>,
-    /// Tooltips de la toolbar; viven lo que la ventana.
-    tooltips: Option<Tooltips>,
-}
-
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+// PENDIENTE(limpieza): duplicada en overlay/mod.rs (y `wide` está en
+// alerts); extraer a un módulo util interno del crate.
+fn punto(lparam: LPARAM) -> (i32, i32) {
+    (
+        (lparam.0 & 0xFFFF) as i16 as i32,
+        ((lparam.0 >> 16) & 0xFFFF) as i16 as i32,
+    )
 }
 
 /// Abre el editor con la captura y bloquea el hilo de UI hasta cerrarlo.
@@ -110,28 +115,15 @@ pub fn show_editor(frame: Frame) {
 }
 
 fn run(frame: Frame) -> windows::core::Result<()> {
-    let screen = ScreenDc::get()?;
-    let dc = MemDc::compatible_with(&screen)?;
-    let dib = dib_from_frame(&dc, &frame)?;
-    drop(dc);
-    drop(screen);
-
     let titulo = wide(&format!(
         "Captura {}×{} — RustCapture",
         frame.width, frame.height
     ));
     // Tamaño inicial: imagen + chrome, acotado a un máximo razonable.
     let win_w = (frame.width as i32 + 60).clamp(720, 1280);
-    let win_h = (frame.height as i32 + 160).clamp(400, 840);
+    let win_h = (frame.height as i32 + 190).clamp(430, 840);
 
-    let state_ptr = Box::into_raw(Box::new(EditorState {
-        frame,
-        dib,
-        cerrado: false,
-        dirty: false,
-        nombre: None,
-        tooltips: None,
-    }));
+    let state_ptr = Box::into_raw(Box::new(EditorState::new(frame)?));
 
     // SAFETY: patrón del overlay: el estado lo posee esta función; la
     // ventana se destruye antes del Box::from_raw.
@@ -224,6 +216,16 @@ fn crear_toolbar(hwnd: HWND) {
     }
     if let Some(state) = state_mut(hwnd) {
         state.tooltips = tooltips;
+        // Sin fuentes del sistema no hay herramienta de texto.
+        if !state.tiene_fuente {
+            // SAFETY: deshabilitar un control hijo propio.
+            unsafe {
+                if let Ok(btn) = GetDlgItem(Some(hwnd), i32::from(math::ID_TEXTO)) {
+                    _ = EnableWindow(btn, false);
+                }
+            }
+        }
+        marcar_herramienta(hwnd, None, state.herramienta);
     }
 }
 
@@ -250,6 +252,59 @@ fn reposicionar_toolbar(hwnd: HWND) {
             }
         }
     }
+}
+
+/// Refleja la herramienta activa en la toolbar (estado 'activo' en acento).
+fn marcar_herramienta(hwnd: HWND, previa: Option<math::Herramienta>, nueva: math::Herramienta) {
+    // SAFETY: consulta de controles hijos propios.
+    unsafe {
+        if let Some(previa) = previa
+            && let Ok(btn) = GetDlgItem(Some(hwnd), i32::from(math::id_de_herramienta(previa)))
+        {
+            boton::set_activo(btn, false);
+        }
+        if let Ok(btn) = GetDlgItem(Some(hwnd), i32::from(math::id_de_herramienta(nueva))) {
+            boton::set_activo(btn, true);
+        }
+    }
+}
+
+fn cambiar_herramienta(hwnd: HWND, state: &mut EditorState, nueva: math::Herramienta) {
+    // Cambiar de herramienta confirma la caja de texto abierta.
+    texto::commit_text(hwnd, state);
+    if state.herramienta != nueva {
+        let previa = state.herramienta;
+        state.herramienta = nueva;
+        marcar_herramienta(hwnd, Some(previa), nueva);
+        // La property bar cambia con la herramienta.
+        // SAFETY: invalidación de la propia ventana.
+        unsafe { _ = InvalidateRect(Some(hwnd), None, false) };
+    }
+}
+
+/// Rect destino (coordenadas de cliente) de la imagen encajada en el canvas.
+fn dest_rect(hwnd: HWND, state: &EditorState) -> Rect {
+    let escala = Escala::from_hwnd(hwnd);
+    let mut client = RECT::default();
+    // SAFETY: consulta sin precondiciones.
+    unsafe { _ = GetClientRect(hwnd, &mut client) };
+    let reparto = math::reparto(
+        client.bottom - client.top,
+        escala.px(math::TOOLBAR_LOGICO),
+        escala.px(math::PROPS_LOGICO),
+        escala.px(math::STATUS_LOGICO),
+    );
+    let lienzo = (
+        client.right - client.left,
+        reparto.status_inicio - reparto.props_fin,
+    );
+    let encajado = math::fit_rect((state.committed.width, state.committed.height), lienzo);
+    Rect::new(
+        encajado.x,
+        encajado.y + reparto.props_fin,
+        encajado.width,
+        encajado.height,
+    )
 }
 
 /// Diálogo "Guardar como" → codifica y escribe. Errores → MessageBox.
@@ -306,14 +361,44 @@ fn guardar_como(hwnd: HWND, frame: &Frame) -> Option<String> {
     }
 }
 
+fn deshacer(hwnd: HWND, state: &mut EditorState) {
+    texto::commit_text(hwnd, state);
+    if state.history.undo(&mut state.doc) {
+        state.refresh_committed();
+        state.dirty = true;
+        // SAFETY: invalidación de la propia ventana.
+        unsafe { _ = InvalidateRect(Some(hwnd), None, false) };
+    }
+}
+
+fn rehacer(hwnd: HWND, state: &mut EditorState) {
+    texto::commit_text(hwnd, state);
+    if state.history.redo(&mut state.doc) {
+        state.refresh_committed();
+        state.dirty = true;
+        // SAFETY: invalidación de la propia ventana.
+        unsafe { _ = InvalidateRect(Some(hwnd), None, false) };
+    }
+}
+
 fn on_command(hwnd: HWND, id: u16) {
+    let Some(state) = state_mut(hwnd) else {
+        return;
+    };
+    if let Some(herramienta) = math::herramienta_de_id(id) {
+        if herramienta != math::Herramienta::Texto || state.tiene_fuente {
+            cambiar_herramienta(hwnd, state, herramienta);
+        }
+        return;
+    }
     match id {
+        math::ID_UNDO => deshacer(hwnd, state),
+        math::ID_REDO => rehacer(hwnd, state),
         math::ID_GUARDAR => {
-            if let Some(state) = state_mut(hwnd)
-                && let Some(ruta) = guardar_como(hwnd, &state.frame)
-            {
+            // Hornear bajo demanda: committed = base + documento vigente.
+            texto::commit_text(hwnd, state);
+            if let Some(ruta) = guardar_como(hwnd, &state.committed) {
                 state.dirty = false;
-                // Título y status con el nombre del archivo guardado.
                 let nombre = std::path::Path::new(&ruta)
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
@@ -328,31 +413,15 @@ fn on_command(hwnd: HWND, id: u16) {
             }
         }
         math::ID_COPIAR => {
-            if let Some(state) = state_mut(hwnd) {
-                match crate::clipboard::ClipboardSink::new().deliver(&state.frame) {
-                    Ok(()) => {
-                        state.dirty = false;
-                        crate::alerts::capture_beep();
-                        // SAFETY: invalidación de la propia ventana.
-                        unsafe { _ = InvalidateRect(Some(hwnd), None, false) };
-                    }
-                    Err(_) => crate::alerts::error_beep(),
+            texto::commit_text(hwnd, state);
+            match crate::clipboard::ClipboardSink::new().deliver(&state.committed) {
+                Ok(()) => {
+                    state.dirty = false;
+                    crate::alerts::capture_beep();
+                    // SAFETY: invalidación de la propia ventana.
+                    unsafe { _ = InvalidateRect(Some(hwnd), None, false) };
                 }
-            }
-        }
-        // Draw: ventana de dibujo modal; OK devuelve el frame horneado.
-        math::ID_DRAW => {
-            if let Some(state) = state_mut(hwnd)
-                && let Some(nuevo) = crate::draw::show_draw(state.frame.clone())
-                && let Ok(screen) = ScreenDc::get()
-                && let Ok(dc) = MemDc::compatible_with(&screen)
-                && let Ok(dib) = dib_from_frame(&dc, &nuevo)
-            {
-                state.frame = nuevo;
-                state.dib = dib;
-                state.dirty = true;
-                // SAFETY: invalidación de la propia ventana.
-                unsafe { _ = InvalidateRect(Some(hwnd), None, false) };
+                Err(_) => crate::alerts::error_beep(),
             }
         }
         _ => {}
@@ -374,7 +443,111 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 LRESULT(0)
             }
             WM_COMMAND => {
-                on_command(hwnd, (wparam.0 & 0xFFFF) as u16);
+                let id = (wparam.0 & 0xFFFF) as u16;
+                let code = ((wparam.0 >> 16) & 0xFFFF) as u32;
+                if id == ID_EDIT_TEXT {
+                    if code == EN_KILLFOCUS
+                        && let Some(state) = state_mut(hwnd)
+                    {
+                        texto::commit_text(hwnd, state);
+                    }
+                } else {
+                    on_command(hwnd, id);
+                }
+                LRESULT(0)
+            }
+            WM_LBUTTONDOWN => {
+                if let Some(state) = state_mut(hwnd) {
+                    let p = punto(lparam);
+                    if props::on_click(hwnd, state, p) {
+                        return LRESULT(0);
+                    }
+                    let destino = dest_rect(hwnd, state);
+                    let tam = (state.committed.width, state.committed.height);
+                    if let Some(pf) = math::view_to_frame(p, destino, tam) {
+                        if state.herramienta == math::Herramienta::Texto {
+                            texto::commit_text(hwnd, state);
+                            if let Some(state) = state_mut(hwnd) {
+                                texto::abrir_edit(hwnd, state, pf, destino);
+                            }
+                        } else {
+                            state.drag = Some(DragState {
+                                start: pf,
+                                current: pf,
+                                points: vec![pf],
+                            });
+                            SetCapture(hwnd);
+                        }
+                    }
+                }
+                LRESULT(0)
+            }
+            WM_MOUSEMOVE => {
+                if let Some(state) = state_mut(hwnd) {
+                    let destino = dest_rect(hwnd, state);
+                    let tam = (state.committed.width, state.committed.height);
+                    if state.drag.is_some()
+                        && let Some(pf) = math::view_to_frame(punto(lparam), destino, tam)
+                        && let Some(drag) = state.drag.as_mut()
+                    {
+                        drag.current = pf;
+                        if state.herramienta == math::Herramienta::Lapiz {
+                            drag.points.push(pf);
+                        }
+                        // Solo cambia el canvas: invalidar su rect encajado.
+                        let zona = RECT {
+                            left: destino.x,
+                            top: destino.y,
+                            right: destino.x + destino.width as i32,
+                            bottom: destino.y + destino.height as i32,
+                        };
+                        _ = InvalidateRect(Some(hwnd), Some(&zona), false);
+                    }
+                }
+                LRESULT(0)
+            }
+            WM_LBUTTONUP => {
+                if let Some(state) = state_mut(hwnd)
+                    && state.drag.is_some()
+                {
+                    _ = ReleaseCapture();
+                    if let Some(anotacion) = state.anotacion_en_curso() {
+                        state
+                            .history
+                            .apply(&mut state.doc, rustcapture_core::annotate::Command::add(anotacion));
+                        state.refresh_committed();
+                        state.dirty = true;
+                    }
+                    state.drag = None;
+                    _ = InvalidateRect(Some(hwnd), None, false);
+                }
+                LRESULT(0)
+            }
+            WM_KEYDOWN => {
+                if let Some(state) = state_mut(hwnd) {
+                    let ctrl = GetKeyState(VK_CONTROL.0 as i32) < 0;
+                    match wparam.0 as u16 {
+                        k if k == VK_ESCAPE.0 => {
+                            // Esc solo cancela la caja de texto abierta.
+                            if let Some(edit) = state.edit.take() {
+                                texto::cerrar_edit(edit);
+                                _ = InvalidateRect(Some(hwnd), None, false);
+                            }
+                        }
+                        k if ctrl && k == b'Z' as u16 => deshacer(hwnd, state),
+                        k if ctrl && k == b'Y' as u16 => rehacer(hwnd, state),
+                        _ => {}
+                    }
+                }
+                LRESULT(0)
+            }
+            m if m == WM_APP_CANCEL_TEXT => {
+                if let Some(state) = state_mut(hwnd)
+                    && let Some(edit) = state.edit.take()
+                {
+                    texto::cerrar_edit(edit);
+                    _ = InvalidateRect(Some(hwnd), None, false);
+                }
                 LRESULT(0)
             }
             WM_SIZE => {
@@ -448,9 +621,9 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
     }
 }
 
-/// Compone todo el cliente (toolbar, canvas con la imagen encajada y
+/// Compone todo el cliente (toolbar, property bar, canvas anotable y
 /// status bar) en un back buffer y lo vuelca de un BitBlt.
-fn pintar(hwnd: HWND, hdc: HDC, state: &EditorState) -> windows::core::Result<()> {
+fn pintar(hwnd: HWND, hdc: HDC, state: &mut EditorState) -> windows::core::Result<()> {
     let paleta = theme::actual().paleta();
     let escala = Escala::from_hwnd(hwnd);
     // SAFETY: hdc de BeginPaint; recursos RAII; brochas propias
@@ -465,6 +638,7 @@ fn pintar(hwnd: HWND, hdc: HDC, state: &EditorState) -> windows::core::Result<()
         let reparto = math::reparto(
             alto,
             escala.px(math::TOOLBAR_LOGICO),
+            escala.px(math::PROPS_LOGICO),
             escala.px(math::STATUS_LOGICO),
         );
 
@@ -473,11 +647,11 @@ fn pintar(hwnd: HWND, hdc: HDC, state: &EditorState) -> windows::core::Result<()
         let back = Dib::new_32bpp(&back_dc, ancho as u32, alto as u32)?;
         let _b = Selected::bitmap(&back_dc, &back)?;
 
-        // Toolbar y status: superficie. Canvas: fondo de canvas del tema.
+        // Bandas superiores y status: superficie. Canvas: fondo de canvas.
         let superficie = CreateSolidBrush(paleta.superficie);
         FillRect(
             back_dc.0,
-            &RECT { left: 0, top: 0, right: ancho, bottom: reparto.toolbar_fin },
+            &RECT { left: 0, top: 0, right: ancho, bottom: reparto.props_fin },
             superficie,
         );
         FillRect(
@@ -491,61 +665,69 @@ fn pintar(hwnd: HWND, hdc: HDC, state: &EditorState) -> windows::core::Result<()
             back_dc.0,
             &RECT {
                 left: 0,
-                top: reparto.toolbar_fin,
+                top: reparto.props_fin,
                 right: ancho,
                 bottom: reparto.status_inicio,
             },
             fondo_canvas,
         );
         _ = DeleteObject(fondo_canvas.into());
-        // Separadores de 1 px bajo la toolbar y sobre el status.
+        // Separadores de 1 px: toolbar/props, props/canvas y canvas/status.
         let borde = CreateSolidBrush(paleta.borde);
         let linea = escala.px(1).max(1);
-        FillRect(
-            back_dc.0,
-            &RECT {
-                left: 0,
-                top: reparto.toolbar_fin - linea,
-                right: ancho,
-                bottom: reparto.toolbar_fin,
-            },
-            borde,
-        );
-        FillRect(
-            back_dc.0,
-            &RECT {
-                left: 0,
-                top: reparto.status_inicio,
-                right: ancho,
-                bottom: reparto.status_inicio + linea,
-            },
-            borde,
-        );
+        for y in [reparto.toolbar_fin - linea, reparto.props_fin - linea, reparto.status_inicio] {
+            FillRect(
+                back_dc.0,
+                &RECT { left: 0, top: y, right: ancho, bottom: y + linea },
+                borde,
+            );
+        }
         _ = DeleteObject(borde.into());
 
-        // Imagen encajada en el canvas.
-        let lienzo = (ancho, reparto.status_inicio - reparto.toolbar_fin);
-        let destino = math::fit_rect((state.frame.width, state.frame.height), lienzo);
-        let porcentaje = if state.frame.width > 0 {
-            (u64::from(destino.width) * 100 / u64::from(state.frame.width)) as u32
+        // Property bar contextual (guarda las zonas para el hit-test).
+        let banda_props = RECT {
+            left: 0,
+            top: reparto.toolbar_fin,
+            right: ancho,
+            bottom: reparto.props_fin - linea,
+        };
+        state.chips = props::pintar(back_dc.0, banda_props, state, escala);
+
+        // Canvas: comprometido, o comprometido + provisional durante el
+        // arrastre (buffers persistentes: dos memcpy, cero asignaciones).
+        let lienzo = (ancho, reparto.status_inicio - reparto.props_fin);
+        let encajado = math::fit_rect((state.committed.width, state.committed.height), lienzo);
+        let porcentaje = if state.committed.width > 0 {
+            (u64::from(encajado.width) * 100 / u64::from(state.committed.width)) as u32
         } else {
             100
         };
-        if !destino.is_empty() {
+        if !encajado.is_empty() {
+            let dib = if let Some(anotacion) = state.anotacion_en_curso() {
+                state.preview.pixels.copy_from_slice(&state.committed.pixels);
+                {
+                    let mut canvas = rustcapture_core::annotate::Canvas::new(&mut state.preview);
+                    anotacion.render(&mut canvas, &state.ctx);
+                }
+                crate::gdi::copy_frame_to_dib(&state.preview, &mut state.preview_dib);
+                &state.preview_dib
+            } else {
+                &state.committed_dib
+            };
             let src_dc = MemDc::compatible_with(&screen)?;
-            let _s = Selected::bitmap(&src_dc, &state.dib)?;
+            let _s = Selected::bitmap(&src_dc, dib)?;
             SetStretchBltMode(back_dc.0, HALFTONE);
             _ = StretchBlt(
                 back_dc.0,
-                destino.x,
-                destino.y + reparto.toolbar_fin,
-                destino.width as i32,
-                destino.height as i32,
+                encajado.x,
+                encajado.y + reparto.props_fin,
+                encajado.width as i32,
+                encajado.height as i32,
                 Some(src_dc.0),
                 0,
                 0,
-                state.frame.width as i32,
-                state.frame.height as i32,
+                state.committed.width as i32,
+                state.committed.height as i32,
                 SRCCOPY,
             );
         }
@@ -553,7 +735,7 @@ fn pintar(hwnd: HWND, hdc: HDC, state: &EditorState) -> windows::core::Result<()
         // Status bar: dimensiones · % de encaje · destino/estado.
         let mut status = format!(
             "{} × {} px · {} %",
-            state.frame.width, state.frame.height, porcentaje
+            state.committed.width, state.committed.height, porcentaje
         );
         match &state.nombre {
             Some(nombre) => {
