@@ -82,6 +82,7 @@ fn main() -> ExitCode {
         config.hotkeys.clone(),
         config.theme.mode,
         config.text.familia.clone(),
+        (config.capture.fixed_width, config.capture.fixed_height),
     ) {
         Ok(b) => b,
         Err(e) => {

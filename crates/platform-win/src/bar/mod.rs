@@ -27,6 +27,7 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::w;
 
 use crate::dpi::Escala;
+use crate::overlay::ModoOverlay;
 use crate::ui::botonera::{self, BotonDef, Elemento};
 use crate::ui::{boton, iconos, layout, lienzo, theme, tooltip::Tooltips, ventana};
 
@@ -37,6 +38,10 @@ pub(crate) const WM_TRAY: u32 = WM_APP + 1;
 /// Petición de selección de región (botón o hotkey): debe correr en el
 /// hilo de UI, nunca en el orquestador.
 pub(crate) const WM_APP_REGION: u32 = WM_APP + 2;
+/// Hermanos de `WM_APP_REGION` para los otros dos modos de selección; el
+/// overlay corre en el hilo de UI y hay que salir del contexto del clic.
+const WM_APP_OBJETO: u32 = WM_APP + 4;
+const WM_APP_FIJA: u32 = WM_APP + 5;
 
 pub(crate) const MENU_FULLSCREEN: u16 = 2001;
 pub(crate) const MENU_WINDOW: u16 = 2002;
@@ -53,6 +58,8 @@ struct BarState {
     hotkeys: HotkeysConfig,
     /// Tipografía por defecto que recibe el editor al abrirse (f.54).
     familia_texto: String,
+    /// Tamaño inicial de la región fija (f.15), de `[capture]`.
+    tam_fijo: (u32, u32),
     /// Control de tooltips; vive lo que la ventana (RefCell: hilo de UI).
     tooltips: RefCell<Option<Tooltips>>,
 }
@@ -74,9 +81,18 @@ impl Bar {
         hotkeys: HotkeysConfig,
         theme_mode: ThemeMode,
         familia_texto: String,
+        tam_fijo: (u32, u32),
     ) -> Result<Self, String> {
-        Self::create_win32(tx, destination, delay_ms, hotkeys, theme_mode, familia_texto)
-            .map_err(|e| e.to_string())
+        Self::create_win32(
+            tx,
+            destination,
+            delay_ms,
+            hotkeys,
+            theme_mode,
+            familia_texto,
+            tam_fijo,
+        )
+        .map_err(|e| e.to_string())
     }
 
     fn create_win32(
@@ -86,6 +102,7 @@ impl Bar {
         hotkeys: HotkeysConfig,
         theme_mode: ThemeMode,
         familia_texto: String,
+        tam_fijo: (u32, u32),
     ) -> windows::core::Result<Self> {
         theme::refrescar(theme_mode);
         // SAFETY: registro de clase + creación de ventana estándar; el
@@ -111,6 +128,7 @@ impl Bar {
                 delay_ms,
                 hotkeys,
                 familia_texto,
+                tam_fijo,
                 tooltips: RefCell::new(None),
             }));
             // Tamaño provisional: WM_CREATE lo corrige con el DPI real.
@@ -195,6 +213,15 @@ pub(crate) fn on_command(hwnd: HWND, id: u16) {
             // SAFETY: post a la propia ventana del wndproc.
             unsafe { _ = PostMessageW(Some(hwnd), WM_APP_REGION, WPARAM(0), LPARAM(0)) };
         }
+        // f.11/f.12 y f.15: mismo patrón, otro modo de overlay.
+        math::ID_OBJECT => {
+            // SAFETY: post a la propia ventana del wndproc.
+            unsafe { _ = PostMessageW(Some(hwnd), WM_APP_OBJETO, WPARAM(0), LPARAM(0)) };
+        }
+        math::ID_FIXED => {
+            // SAFETY: post a la propia ventana del wndproc.
+            unsafe { _ = PostMessageW(Some(hwnd), WM_APP_FIJA, WPARAM(0), LPARAM(0)) };
+        }
         // f.17: captura del monitor activo tras el retardo configurado.
         math::ID_DELAY => {
             if let Some(state) = state_ref(hwnd) {
@@ -229,14 +256,16 @@ pub(crate) fn on_command(hwnd: HWND, id: u16) {
     }
 }
 
-/// Oculta la barra, abre el overlay y publica la región elegida.
-fn flujo_region(hwnd: HWND) {
+/// Oculta la barra, abre el overlay en el modo pedido y publica la región
+/// elegida. Los tres modos acaban en `ModeRequest::Region`: son formas
+/// distintas de elegir un rect, no modos de captura distintos.
+fn flujo_seleccion(hwnd: HWND, modo: ModoOverlay) {
     // SAFETY: hwnd válido (viene del wndproc); ocultar/mostrar la propia
     // ventana alrededor del overlay para no salir en la captura.
     unsafe {
         _ = ShowWindow(hwnd, SW_HIDE);
         std::thread::sleep(std::time::Duration::from_millis(150));
-        let resultado = crate::overlay::select_region();
+        let resultado = crate::overlay::select_region(modo, hwnd.0 as isize);
         _ = ShowWindow(hwnd, SW_SHOW);
         if let (Some(rect), Some(state)) = (resultado, state_ref(hwnd)) {
             let _ = state.tx.send(AppEvent::CaptureRequested(CaptureRequest {
@@ -392,7 +421,18 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 LRESULT(0)
             }
             m if m == WM_APP_REGION => {
-                flujo_region(hwnd);
+                flujo_seleccion(hwnd, ModoOverlay::Rectangulo);
+                LRESULT(0)
+            }
+            m if m == WM_APP_OBJETO => {
+                flujo_seleccion(hwnd, ModoOverlay::Objeto);
+                LRESULT(0)
+            }
+            m if m == WM_APP_FIJA => {
+                let (ancho, alto) = state_ref(hwnd)
+                    .map(|s| s.tam_fijo)
+                    .unwrap_or((800, 600));
+                flujo_seleccion(hwnd, ModoOverlay::Fija { ancho, alto });
                 LRESULT(0)
             }
             m if m == crate::editor::WM_APP_EDITOR => {

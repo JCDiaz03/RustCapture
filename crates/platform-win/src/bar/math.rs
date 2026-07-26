@@ -17,7 +17,7 @@ pub(crate) const ID_RECORD: u16 = 1005;
 pub(crate) const ID_CONFIG: u16 = 1006;
 pub(crate) const ID_CLOSE: u16 = 1008;
 pub(crate) const ID_OBJECT: u16 = 1009;
-pub(crate) const ID_FREEHAND: u16 = 1010;
+// 1010 era ID_FREEHAND (mano alzada), descartada: el id no se reutiliza.
 pub(crate) const ID_FIXED: u16 = 1011;
 pub(crate) const ID_SCROLL: u16 = 1012;
 pub(crate) const ID_EYEDROPPER: u16 = 1013;
@@ -54,10 +54,11 @@ pub(crate) fn fila() -> Vec<Elemento> {
         Elemento::Asa,
         boton(ID_FULLSCREEN, CaptureFullscreen, "Pantalla completa", true),
         boton(ID_WINDOW, CaptureWindow, "Ventana activa", true),
-        boton(ID_OBJECT, CaptureObject, "Objeto de ventana", false),
+        boton(ID_OBJECT, CaptureObject, "Objeto de ventana o menú", true),
         boton(ID_REGION, CaptureRegion, "Región", true),
-        boton(ID_FREEHAND, CaptureFreehand, "Mano alzada", false),
-        boton(ID_FIXED, CaptureFixed, "Región fija", false),
+        // La mano alzada está descartada (ver ideas.md §Descartado): un botón
+        // que nunca se va a encender solo es ruido en la fila.
+        boton(ID_FIXED, CaptureFixed, "Región fija (rueda ajusta)", true),
         boton(ID_SCROLL, CaptureScroll, "Captura con scroll", false),
         boton(ID_DELAY, CaptureDelay, "Captura con retardo", true),
         Elemento::Separador,
@@ -97,15 +98,16 @@ mod tests {
     }
 
     #[test]
-    fn la_fila_tiene_17_botones_con_ids_unicos_y_asa_delante() {
+    fn la_fila_tiene_dieciseis_botones_con_ids_unicos_y_asa_delante() {
+        // 16 y no 17: la mano alzada está descartada (ideas.md §Descartado).
         let fila = fila();
         assert!(matches!(fila[0], Elemento::Asa));
         let botones = botones(&fila);
-        assert_eq!(botones.len(), 17);
+        assert_eq!(botones.len(), 16);
         let mut ids: Vec<u16> = botones.iter().map(|b| b.id).collect();
         ids.sort_unstable();
         ids.dedup();
-        assert_eq!(ids.len(), 17, "ids repetidos");
+        assert_eq!(ids.len(), 16, "ids repetidos");
     }
 
     #[test]
@@ -115,7 +117,15 @@ mod tests {
             botones(&fila).iter().filter(|b| b.habilitado).map(|b| b.id).collect();
         assert_eq!(
             habilitados,
-            vec![ID_FULLSCREEN, ID_WINDOW, ID_REGION, ID_DELAY, ID_CLOSE]
+            vec![
+                ID_FULLSCREEN,
+                ID_WINDOW,
+                ID_OBJECT,
+                ID_REGION,
+                ID_FIXED,
+                ID_DELAY,
+                ID_CLOSE
+            ]
         );
     }
 

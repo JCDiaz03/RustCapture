@@ -19,14 +19,38 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, VK
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::w;
 
+/// Bit de Shift en el wparam de `WM_MOUSEWHEEL`. Se define aquí en vez de
+/// importar `MK_SHIFT`: vive en `Win32::System::SystemServices`, una feature
+/// que el crate no habilita, y activarla entera por una constante no sale a
+/// cuenta.
+const MK_SHIFT_BIT: usize = 0x0004;
+
 use crate::dpi::Escala;
 use crate::gdi::GdiScreenSource;
 use crate::gdi::raii::{Dib, MemDc, ScreenDc, Selected};
 use crate::ui::{fuentes, lienzo, theme, ventana};
 use crate::util::punto;
 
+/// Cómo se elige el rect. Los tres modos comparten superficie, congelado,
+/// máscara y pintado: lo ÚNICO que cambia es de dónde sale la «selección
+/// vigente» (ver `seleccion_vigente`).
+#[derive(Clone, PartialEq, Debug)]
+pub enum ModoOverlay {
+    /// Arrastre libre (f.13).
+    Rectangulo,
+    /// Señalar una ventana o control ya existente (f.11, f.12).
+    Objeto,
+    /// Rect de tamaño predefinido siguiendo al cursor (f.15).
+    Fija { ancho: u32, alto: u32 },
+}
+
 /// Estado del overlay; lo posee `select_region`, el wndproc solo lo usa.
 struct OverlayState {
+    modo: ModoOverlay,
+    /// Rects señalables (solo en modo Objeto), en coordenadas de ESCRITORIO.
+    candidatos: Vec<crate::ventanas::Candidato>,
+    /// Tamaño vigente del modo Fija; la rueda lo ajusta.
+    tam_fijo: (u32, u32),
     origin: (i32, i32),
     width: i32,
     height: i32,
@@ -47,16 +71,54 @@ struct OverlayState {
     sel_previa: Option<Rect>,
 }
 
-/// Selección interactiva. Bloquea el hilo de UI hasta soltar el botón o
-/// Esc. `None` = cancelado o fallo al congelar (con beep).
-pub fn select_region() -> Option<Rect> {
-    match run() {
+/// Selección interactiva. Bloquea el hilo de UI hasta confirmar o Esc.
+/// `None` = cancelado o fallo al congelar (con beep). `excluir_raw` es el
+/// HWND de la barra, que no debe ofrecerse como candidato.
+pub fn select_region(modo: ModoOverlay, excluir_raw: isize) -> Option<Rect> {
+    match run(modo, excluir_raw) {
         Ok(resultado) => resultado,
         Err(_) => {
             crate::alerts::error_beep();
             None
         }
     }
+}
+
+/// Rect que el overlay pinta SIN blanquear, en coordenadas LOCALES. Es la
+/// única diferencia real entre los tres modos: uno lo saca del arrastre, otro
+/// del árbol de ventanas y otro del tamaño fijo.
+fn seleccion_vigente(state: &OverlayState) -> Option<Rect> {
+    match &state.modo {
+        ModoOverlay::Rectangulo => state
+            .drag_start
+            .map(|inicio| math::rect_between(inicio, state.cursor)),
+        ModoOverlay::Objeto => {
+            // Los candidatos están en coordenadas de ESCRITORIO y el overlay
+            // pinta en locales.
+            let global = (
+                state.cursor.0 + state.origin.0,
+                state.cursor.1 + state.origin.1,
+            );
+            crate::ventanas::bajo_el_cursor(&state.candidatos, global).map(|r| {
+                Rect::new(
+                    r.x - state.origin.0,
+                    r.y - state.origin.1,
+                    r.width,
+                    r.height,
+                )
+            })
+        }
+        ModoOverlay::Fija { .. } => Some(math::rect_fijo(
+            state.cursor,
+            state.tam_fijo,
+            Rect::new(0, 0, state.width as u32, state.height as u32),
+        )),
+    }
+}
+
+/// `true` si el modo se confirma con un solo clic (no hay arrastre).
+fn es_de_un_clic(modo: &ModoOverlay) -> bool {
+    !matches!(modo, ModoOverlay::Rectangulo)
 }
 
 /// Crosshair monocromo 32×32 negro con el punto origen (centro) en
@@ -89,7 +151,17 @@ fn crear_cursor_cruz() -> Option<HCURSOR> {
 
 use crate::gdi::dib_from_frame;
 
-fn run() -> windows::core::Result<Option<Rect>> {
+fn run(modo: ModoOverlay, excluir_raw: isize) -> windows::core::Result<Option<Rect>> {
+    // ORDEN CRÍTICO: la instantánea del árbol va ANTES de congelar y de
+    // crear la ventana. Un menú desplegado se cierra en cuanto aparece otra
+    // ventana; si esto se moviera más abajo, f.12 dejaría de funcionar y
+    // f.11 seguiría pareciendo correcta — un fallo silencioso.
+    let candidatos = if modo == ModoOverlay::Objeto {
+        crate::ventanas::instantanea(HWND(excluir_raw as *mut _))
+    } else {
+        Vec::new()
+    };
+
     // Congelar el escritorio completo.
     let mut source = GdiScreenSource::new();
     let desktop = GdiScreenSource::desktop_rect(&source);
@@ -102,7 +174,21 @@ fn run() -> windows::core::Result<Option<Rect>> {
     // Bitmaps GDI (original, máscara y back buffer del doble buffer).
     let screen = ScreenDc::get()?;
     let dc = MemDc::compatible_with(&screen)?;
+    let tam_fijo = match modo {
+        ModoOverlay::Fija { ancho, alto } => (ancho.max(1), alto.max(1)),
+        _ => (0, 0),
+    };
+    // El crosshair solo aporta cuando se apunta a un píxel exacto; en los
+    // modos de un clic estorba más que ayuda.
+    let cursor_cruz = if modo == ModoOverlay::Rectangulo {
+        crear_cursor_cruz()
+    } else {
+        None
+    };
     let state = Box::new(OverlayState {
+        modo,
+        candidatos,
+        tam_fijo,
         origin: (desktop.x, desktop.y),
         width: desktop.width as i32,
         height: desktop.height as i32,
@@ -111,7 +197,7 @@ fn run() -> windows::core::Result<Option<Rect>> {
         back: Dib::new_32bpp(&dc, desktop.width, desktop.height)?,
         drag_start: None,
         cursor: (0, 0),
-        cursor_cruz: crear_cursor_cruz(),
+        cursor_cruz,
         outcome: None,
         zona_lupa_previa: None,
         sel_previa: None,
@@ -197,9 +283,29 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             }
             WM_LBUTTONDOWN => {
                 if let Some(state) = state_mut(hwnd) {
-                    state.drag_start = Some(punto(lparam));
                     state.cursor = punto(lparam);
-                    SetCapture(hwnd);
+                    if es_de_un_clic(&state.modo) {
+                        // Objeto y Fija se confirman aquí: lo que se ve
+                        // resaltado ES la selección.
+                        state.outcome = Some(seleccion_vigente(state));
+                        _ = DestroyWindow(hwnd);
+                    } else {
+                        state.drag_start = Some(punto(lparam));
+                        SetCapture(hwnd);
+                        _ = InvalidateRect(Some(hwnd), None, false);
+                    }
+                }
+                LRESULT(0)
+            }
+            // Rueda: solo en modo Fija, ajusta el tamaño (Shift = ancho).
+            WM_MOUSEWHEEL => {
+                if let Some(state) = state_mut(hwnd)
+                    && matches!(state.modo, ModoOverlay::Fija { .. })
+                {
+                    let delta = ((wparam.0 >> 16) & 0xFFFF) as i16;
+                    let pasos = (delta / 120) as i32;
+                    let shift = (wparam.0 & MK_SHIFT_BIT) != 0;
+                    state.tam_fijo = math::ajustar_tam(state.tam_fijo, pasos, shift);
                     _ = InvalidateRect(Some(hwnd), None, false);
                 }
                 LRESULT(0)
@@ -215,7 +321,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     let sel_previa = state.sel_previa;
                     state.cursor = punto(lparam);
                     let lupa = zona_lupa(state, escala);
-                    let sel = state.drag_start.map(|s| math::rect_between(s, state.cursor));
+                    let sel = seleccion_vigente(state);
                     for zona in [lupa_previa, Some(lupa)].into_iter().flatten() {
                         _ = InvalidateRect(Some(hwnd), Some(&zona), false);
                     }
@@ -235,6 +341,8 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 LRESULT(0)
             }
             WM_LBUTTONUP => {
+                // Solo cierra el arrastre; los modos de un clic ya se
+                // resolvieron en WM_LBUTTONDOWN.
                 if let Some(state) = state_mut(hwnd)
                     && let Some(start) = state.drag_start
                 {
@@ -289,10 +397,9 @@ fn pintar(hdc: HDC, state: &mut OverlayState, escala: Escala) -> windows::core::
                 SRCCOPY,
             )?;
         }
-        // 2. Región seleccionada limpia + borde rojo.
-        let seleccion = state
-            .drag_start
-            .map(|s| math::rect_between(s, state.cursor));
+        // 2. Región seleccionada limpia + borde rojo. La calcula
+        // `seleccion_vigente`: es lo único que distingue los tres modos.
+        let seleccion = seleccion_vigente(state);
         if let Some(sel) = seleccion {
             let _o = Selected::bitmap(&src_dc, &state.original)?;
             BitBlt(

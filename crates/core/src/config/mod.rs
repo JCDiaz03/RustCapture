@@ -51,16 +51,23 @@ pub enum ThemeMode {
     Dark,
 }
 
-/// Parámetros de captura (f.17: retardo del botón/hotkey Delay).
+/// Parámetros de captura: retardo del botón Delay (f.17) y tamaño con el que
+/// arranca la región fija (f.15), que la rueda ajusta durante la selección.
 #[derive(serde::Serialize, serde::Deserialize, Clone, PartialEq, Debug)]
 #[serde(default)]
 pub struct CaptureConfig {
     pub delay_seconds: u32,
+    pub fixed_width: u32,
+    pub fixed_height: u32,
 }
 
 impl Default for CaptureConfig {
     fn default() -> Self {
-        Self { delay_seconds: 5 }
+        Self {
+            delay_seconds: 5,
+            fixed_width: 800,
+            fixed_height: 600,
+        }
     }
 }
 
@@ -266,6 +273,20 @@ mod tests {
     fn el_retardo_se_configura_en_toml() {
         let config = Config::from_toml("[capture]\ndelay_seconds = 3\n").unwrap();
         assert_eq!(config.capture.delay_ms(), 3_000);
+        // Y no arrastra los demás campos de la sección a cero.
+        assert_eq!(config.capture.fixed_width, 800);
+        assert_eq!(config.capture.fixed_height, 600);
+    }
+
+    #[test]
+    fn el_tamano_de_la_region_fija_sale_de_la_config() {
+        let config = Config::default();
+        assert_eq!((config.capture.fixed_width, config.capture.fixed_height), (800, 600));
+        let config =
+            Config::from_toml("[capture]\nfixed_width = 1280\nfixed_height = 720\n").unwrap();
+        assert_eq!((config.capture.fixed_width, config.capture.fixed_height), (1280, 720));
+        // El retardo mantiene su default aunque no se mencione.
+        assert_eq!(config.capture.delay_seconds, 5);
     }
 
     #[test]

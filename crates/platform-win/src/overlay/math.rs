@@ -12,6 +12,38 @@ pub(crate) const LUPA_INFO_H: i32 = 36;
 /// Separación LÓGICA de la caja respecto al cursor.
 pub(crate) const LUPA_OFFSET: i32 = 16;
 
+/// Píxeles que mueve cada paso de rueda en la región fija (f.15).
+pub(crate) const PASO_FIJO: i32 = 10;
+/// Lado mínimo, para que la rueda no lo deje en nada.
+const MINIMO_FIJO: u32 = 8;
+
+/// Rect de `tam` centrado en el cursor y empujado dentro de `limite`. Si no
+/// cabe, se recorta al límite: mejor eso que devolver algo fuera de pantalla.
+pub(crate) fn rect_fijo(cursor: (i32, i32), tam: (u32, u32), limite: Rect) -> Rect {
+    let w = tam.0.min(limite.width).max(1);
+    let h = tam.1.min(limite.height).max(1);
+    let max_x = (limite.right() as i32 - w as i32).max(limite.x);
+    let max_y = (limite.bottom() as i32 - h as i32).max(limite.y);
+    Rect::new(
+        (cursor.0 - w as i32 / 2).clamp(limite.x, max_x),
+        (cursor.1 - h as i32 / 2).clamp(limite.y, max_y),
+        w,
+        h,
+    )
+}
+
+/// Ajusta el tamaño con la rueda; `solo_ancho` = Shift pulsado.
+pub(crate) fn ajustar_tam(tam: (u32, u32), pasos: i32, solo_ancho: bool) -> (u32, u32) {
+    let mover = |v: u32| -> u32 {
+        (v as i64 + (pasos * PASO_FIJO) as i64).clamp(MINIMO_FIJO as i64, u32::MAX as i64) as u32
+    };
+    if solo_ancho {
+        (mover(tam.0), tam.1)
+    } else {
+        (mover(tam.0), mover(tam.1))
+    }
+}
+
 /// Rect normalizado entre dos puntos de arrastre; mínimo 1×1 (f.19).
 pub(crate) fn rect_between(a: (i32, i32), b: (i32, i32)) -> Rect {
     Rect::new(
@@ -161,5 +193,51 @@ mod tests {
         assert_eq!(hex_de_bgra(0xAB, 0x7D, 0x4A), "#4A7DAB");
         assert_eq!(hex_de_bgra(0, 0, 0), "#000000");
         assert_eq!(hex_de_bgra(255, 255, 255), "#FFFFFF");
+    }
+}
+
+#[cfg(test)]
+mod tests_fijo {
+    use super::*;
+
+    const LIMITE: Rect = Rect { x: 0, y: 0, width: 1000, height: 800 };
+
+    #[test]
+    fn el_rect_fijo_se_centra_en_el_cursor() {
+        assert_eq!(rect_fijo((500, 400), (200, 100), LIMITE), Rect::new(400, 350, 200, 100));
+    }
+
+    #[test]
+    fn el_rect_fijo_no_se_sale_del_limite() {
+        // Pegado a la esquina superior izquierda y a la inferior derecha.
+        assert_eq!(rect_fijo((10, 10), (200, 100), LIMITE), Rect::new(0, 0, 200, 100));
+        assert_eq!(rect_fijo((995, 795), (200, 100), LIMITE), Rect::new(800, 700, 200, 100));
+    }
+
+    #[test]
+    fn un_rect_mayor_que_el_limite_se_recorta_al_limite() {
+        let pequeno = Rect::new(0, 0, 100, 80);
+        assert_eq!(rect_fijo((50, 40), (400, 300), pequeno), Rect::new(0, 0, 100, 80));
+    }
+
+    #[test]
+    fn el_limite_con_origen_negativo_funciona() {
+        let limite = Rect::new(-1920, -100, 3840, 1180);
+        assert_eq!(
+            rect_fijo((-1900, -90), (200, 100), limite),
+            Rect::new(-1920, -100, 200, 100)
+        );
+        // Y en el centro sigue centrándose.
+        assert_eq!(rect_fijo((0, 400), (200, 100), limite), Rect::new(-100, 350, 200, 100));
+    }
+
+    #[test]
+    fn la_rueda_ajusta_el_tamano_con_minimo() {
+        assert_eq!(ajustar_tam((200, 100), 1, false), (210, 110));
+        assert_eq!(ajustar_tam((200, 100), -1, false), (190, 90));
+        // Shift: solo el ancho.
+        assert_eq!(ajustar_tam((200, 100), 2, true), (220, 100));
+        // Nunca baja del mínimo usable.
+        assert_eq!(ajustar_tam((10, 10), -5, false), (8, 8));
     }
 }

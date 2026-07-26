@@ -35,7 +35,6 @@ Desarrollo: IA-first (Opus 4.8 / Fable 5).
 11. Objeto de ventana (controles individuales: botones, paneles, barras).
 12. Menús desplegados.
 13. Región rectangular.
-14. Región a mano alzada.
 15. Región fija (tamaño predefinido).
 16. Ventana / página con scroll (scroll capture automático).
 17. Captura con retardo (temporizador).
@@ -99,6 +98,8 @@ Desarrollo: IA-first (Opus 4.8 / Fable 5).
 6. **Editor de vídeo ampliado**: dibujar/anotar sobre la grabación, no solo trim.
 
 ## Descartado (decisiones de diseño)
+
+- Región a mano alzada (antigua f.14, la tiene FastStone y la Herramienta de Recorte): trazar el lazo a pulso es incómodo y el resultado casi nunca es el que se quería, así que en la práctica se acaba usando la región rectangular. Además obliga a decidir con qué se rellena lo que queda fuera de la forma en cada salida (el portapapeles y el JPEG no tienen alfa). El número 14 queda libre y no se reutiliza (numeración append-only).
 
 - Captura panorámica con cosido manual (Snagit): coste medio-alto (stitching en tiempo real) para un caso de nicho; el scroll capture automático cubre la necesidad principal.
 - Subida a la nube, incluso acotada (FTP/SFTP + servicios): fuera del alcance del proyecto; las salidas locales (archivo, portapapeles, email) cubren el flujo.

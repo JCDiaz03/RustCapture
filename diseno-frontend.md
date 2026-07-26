@@ -27,7 +27,7 @@
 ### V1 — Barra flotante (f.1) `(parcial: horizontal implementada)`
 Superficie principal y única siempre presente. Ventana sin bordes, siempre-encima opcional, arrastrable, acoplable a bordes de pantalla con auto-ocultado (asoma 4 px) `(acoplado pendiente)`.
 - Orientación horizontal `(hecha)` y vertical `(pendiente)` (misma botonera).
-- Botonera: un botón por modo de captura frecuente (pantalla, ventana, objeto, región, mano alzada, región fija, scroll) + retardo, separador, grabar vídeo, separador, utilidades (cuentagotas, lupa, regla, crosshair, pin), separador, ajustes — los modos sin lógica se muestran deshabilitados.
+- Botonera: un botón por modo de captura frecuente (pantalla, ventana, objeto, región, región fija, scroll) + retardo, separador, grabar vídeo, separador, utilidades (cuentagotas, lupa, regla, crosshair, pin), separador, ajustes — los modos sin lógica se muestran deshabilitados. Sin botón de mano alzada: descartada (`ideas.md` §Descartado).
 - Estado colapsado: solo asa de arrastre + botón de expandir `(pendiente)`.
 - Cada botón: icono 16 px + tooltip "Nombre (Hotkey)" `(hecho)`.
 
@@ -36,6 +36,7 @@ Menú contextual nativo: lista de modos de captura con hotkeys, grabar, abrir ed
 
 ### V3 — Overlay de selección y anotación (f.13-f.15, f.20, D10) `(parcial: selección y lupa implementadas)`
 Ventana fullscreen sin bordes sobre el frame congelado (oscurecido ~30 % fuera de la selección).
+- Tres modos sobre la misma superficie `(hechos)`: arrastre libre, señalar un objeto o menú (se resalta el control más pequeño bajo el cursor y basta un clic) y rect de tamaño fijo siguiendo al cursor, ajustable con la rueda (Shift = solo ancho). El crosshair propio solo se usa en el arrastre; en los otros dos manda la flecha del sistema.
 - Crosshair de precisión `(hecho, sin líneas guía a los bordes)`.
 - Lupa flotante junto al cursor (zoom ~6×, píxel central marcado, `#RRGGBB`, coordenadas y tamaño de selección en px) `(hecha)`.
 - Al cerrar la selección: toolbar contextual flotante bajo/sobre la selección con las herramientas de anotación (§V4, mismas strategies) + botones de salida (copiar, guardar, editor completo, cancelar). Enter = ejecutar salida por defecto; Esc = cancelar. `(F4, pendiente)`

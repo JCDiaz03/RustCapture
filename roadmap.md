@@ -37,8 +37,9 @@ Objetivo: capturar y sacar por portapapeles/archivo desde barra, hotkey y CLI. P
 ## 3. F2 — Resto de modos de captura
 
 - ✅ Overlay de selección de región (capa de selección de D10): activa botón «Región» y `ctrl+printscreen`; base de f.11-f.16.
-- ⏳ Objeto de ventana y menús (f.11, f.12).
-- ⏳ Región a mano alzada y región fija (f.14, f.15).
+- ✅ Objeto de ventana y menús (f.11, f.12): instantánea del árbol de ventanas ANTES de congelar (por eso un menú desplegado sigue siendo señalable) y resaltado del rect más pequeño bajo el cursor.
+- ✅ Región fija (f.15): rect de tamaño de config siguiendo al cursor, ajustable con la rueda (Shift = solo ancho).
+- 🚫 Región a mano alzada (antigua f.14): descartada, ver `ideas.md` §Descartado.
 - ⏳ Scroll capture (f.16) — el módulo de mayor riesgo técnico de la fase; referencia: implementación de ShareX.
 - ✅ Retardo/temporizador y repetir última captura (f.17, f.18).
 - ⏳ Escritorios virtuales y capturas diminutas (f.7, f.19).
