@@ -83,6 +83,18 @@ impl Document {
         self.objetos.get(index)
     }
 
+    /// Los objetos en orden de pintado, para serializarlos (f.31).
+    pub fn objetos(&self) -> &[Objeto] {
+        &self.objetos
+    }
+
+    /// Documento a partir de objetos ya construidos: lo usa la carga de un
+    /// `.rcap`. No pasa por `Command` a propósito — no es una edición del
+    /// usuario sino el estado inicial, y su historial arranca vacío.
+    pub fn from_objetos(objetos: Vec<Objeto>) -> Self {
+        Self { objetos }
+    }
+
     /// Índice del objeto bajo el punto, **el de más arriba** en el z-order
     /// (se recorre al revés): si dos se solapan, gana el que se ve encima,
     /// que es el que el usuario cree estar señalando.

@@ -29,3 +29,7 @@ pico-args = "0.5"
 serde = { version = "1", features = ["derive"] }
 toml = "1"
 fontdue = "0.9"
+# Ya venían en el árbol vía `png`: declararlas explícitas para el contenedor
+# del .rcap (f.31) no engorda el binario.
+crc32fast = "1"
+flate2 = "1"

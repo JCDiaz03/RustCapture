@@ -26,7 +26,7 @@ use crate::ports::Rect;
 
 /// Forma de un objeto. Añadir un tipo = un archivo en `annotations/` + una
 /// variante aquí; el compilador señala los `match` que faltan.
-#[derive(Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub enum Forma {
     Flecha(ArrowAnnotation),
     Elipse(EllipseAnnotation),
@@ -104,7 +104,7 @@ impl Forma {
 }
 
 /// Un objeto COLOCADO en el documento: una forma más su giro.
-#[derive(Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct Objeto {
     pub forma: Forma,
     pub giro: Giro,
@@ -364,6 +364,65 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Round-trip TOML de una variante de CADA forma: si alguna no
+    /// serializa, el documento entero se pierde al guardar (f.31).
+    #[test]
+    fn todas_las_formas_sobreviven_al_toml() {
+        let ctx = ctx();
+        for (i, original) in todos().into_iter().enumerate() {
+            let texto = toml::to_string(&original)
+                .unwrap_or_else(|e| panic!("variante {i} no serializa: {e}"));
+            let vuelta: Objeto = toml::from_str(&texto)
+                .unwrap_or_else(|e| panic!("variante {i} no deserializa: {e}\n{texto}"));
+            assert_eq!(
+                vuelta.bounds(&ctx),
+                original.bounds(&ctx),
+                "variante {i} cambió al ir y volver"
+            );
+        }
+    }
+
+    #[test]
+    fn el_giro_sobrevive_como_angulo_y_recupera_su_cache() {
+        let ctx = ctx();
+        let mut o: Objeto = RectAnnotation {
+            rect: Rect::new(1, 2, 20, 8),
+            style: ESTILO,
+        }
+        .into();
+        o.rotar(0.7);
+        let vuelta: Objeto = toml::from_str(&toml::to_string(&o).unwrap()).unwrap();
+        assert!((vuelta.giro.rad() - 0.7).abs() < 1e-6);
+        // Seno y coseno se reconstruyen: la caja girada sale idéntica.
+        assert_eq!(vuelta.bounds(&ctx), o.bounds(&ctx));
+    }
+
+    #[test]
+    fn el_texto_conserva_contenido_estilo_y_familia() {
+        let ctx = ctx();
+        let o: Objeto = TextAnnotation {
+            pos: (7, 9),
+            text: "Hola\nmundo".to_string(),
+            style: TextStyle {
+                color: Color::rgb(1, 2, 3),
+                size: 23.0,
+                bold: true,
+                familia: crate::annotate::style::FamiliaId(5),
+            },
+        }
+        .into();
+        let vuelta: Objeto = toml::from_str(&toml::to_string(&o).unwrap()).unwrap();
+        let Forma::Texto(t) = &vuelta.forma else {
+            panic!("cambió de variante");
+        };
+        assert_eq!(t.text, "Hola\nmundo");
+        assert_eq!(t.pos, (7, 9));
+        assert_eq!(t.style.size, 23.0);
+        assert!(t.style.bold);
+        assert_eq!(t.style.familia.0, 5);
+        _ = ctx;
     }
 
     #[test]

@@ -9,7 +9,7 @@ use crate::annotate::style::CensorMode;
 use crate::annotate::text::RenderContext;
 use crate::ports::Rect;
 
-#[derive(Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct PixelateAnnotation {
     pub rect: Rect,
     pub mode: CensorMode,

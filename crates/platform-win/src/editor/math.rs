@@ -89,6 +89,7 @@ pub(crate) const ID_CROP: u16 = 3021;
 pub(crate) const ID_RESIZE: u16 = 3022;
 pub(crate) const ID_UNDO: u16 = 3023;
 pub(crate) const ID_REDO: u16 = 3024;
+pub(crate) const ID_ABRIR: u16 = 3027;
 pub(crate) const ID_PRINT: u16 = 3025;
 pub(crate) const ID_EMAIL: u16 = 3026;
 
@@ -117,6 +118,7 @@ pub(crate) fn toolbar() -> Vec<Elemento> {
         boton(ID_UNDO, EditUndo, "Deshacer (Ctrl+Z)", true),
         boton(ID_REDO, EditRedo, "Rehacer (Ctrl+Y)", true),
         Elemento::Muelle,
+        boton(ID_ABRIR, OutputOpen, "Abrir re-editable (.rcap)", true),
         boton(ID_COPIAR, OutputCopy, "Copiar al portapapeles", true),
         boton(ID_GUARDAR, OutputSaveAs, "Guardar como…", true),
         boton(ID_PRINT, OutputPrint, "Imprimir", false),
@@ -338,6 +340,7 @@ mod tests {
                 ID_GOMA,
                 ID_UNDO,
                 ID_REDO,
+                ID_ABRIR,
                 ID_COPIAR,
                 ID_GUARDAR
             ]

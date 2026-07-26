@@ -8,7 +8,7 @@ use crate::annotate::style::Style;
 use crate::annotate::text::RenderContext;
 use crate::ports::Rect;
 
-#[derive(Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct EllipseAnnotation {
     pub rect: Rect,
     pub style: Style,

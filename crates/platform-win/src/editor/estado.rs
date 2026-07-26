@@ -264,6 +264,45 @@ impl EditorState {
         })
     }
 
+    /// Sustituye la captura y el documento por los de un `.rcap` (f.31).
+    ///
+    /// RECREA los buffers y sus DIB en vez de rellenarlos: hasta ahora las
+    /// dimensiones del frame eran inmutables durante toda la vida del editor
+    /// y `refresh_committed` cuenta con eso (`copy_from_slice` exige la misma
+    /// longitud). Al abrir otro archivo dejan de serlo.
+    pub(super) fn reemplazar(
+        &mut self,
+        base: Frame,
+        doc: Document,
+        nombre: Option<String>,
+    ) -> windows::core::Result<()> {
+        let screen = ScreenDc::get()?;
+        let dc = MemDc::compatible_with(&screen)?;
+        let committed = base.clone();
+        let committed_dib = dib_from_frame(&dc, &committed)?;
+        let preview = committed.clone();
+        let preview_dib = dib_from_frame(&dc, &preview)?;
+
+        self.base = base;
+        self.committed = committed;
+        self.committed_dib = committed_dib;
+        self.preview = preview;
+        self.preview_dib = preview_dib;
+        self.doc = doc;
+        // El historial arranca vacío: lo abierto es el estado inicial, no una
+        // edición. Deshacer justo tras abrir no debe borrar el documento.
+        self.history = History::new();
+        self.pasos = ContadorPasos::new();
+        self.seleccionado = None;
+        self.mover = None;
+        self.girar = None;
+        self.drag = None;
+        self.dirty = false;
+        self.nombre = nombre;
+        self.refresh_committed();
+        Ok(())
+    }
+
     /// Brocha del fondo de la caja de texto para `WM_CTLCOLOREDIT`. Se
     /// reutiliza mientras el color no cambie (el tema puede cambiar en vivo).
     pub(super) fn brocha_caja(&mut self, color: COLORREF) -> HBRUSH {

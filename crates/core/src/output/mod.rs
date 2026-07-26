@@ -1,6 +1,7 @@
 //! Slice de salidas: sinks, generación automática de nombres y formatos
 //! (features f.40-f.45).
 
+pub mod contenedor;
 mod destination;
 mod encode;
 mod file_sink;

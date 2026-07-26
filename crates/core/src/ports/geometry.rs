@@ -5,7 +5,7 @@
 ///
 /// f.19 permite capturas diminutas: no hay tamaño mínimo, solo el
 /// rect de área cero se considera vacío.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Rect {
     pub x: i32,
     pub y: i32,

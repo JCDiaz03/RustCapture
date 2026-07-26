@@ -5,6 +5,7 @@ pub mod annotations;
 mod canvas;
 mod censor;
 mod document;
+pub mod formato;
 mod giro;
 mod objeto;
 mod shapes;

@@ -8,7 +8,7 @@ use crate::annotate::style::Style;
 use crate::annotate::text::RenderContext;
 use crate::ports::Rect;
 
-#[derive(Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct PenAnnotation {
     pub points: Vec<(i32, i32)>,
     pub style: Style,

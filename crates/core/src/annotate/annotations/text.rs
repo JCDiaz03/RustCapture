@@ -7,7 +7,7 @@ use crate::annotate::style::TextStyle;
 use crate::annotate::text::{RenderContext, draw_text, draw_text_rotado, text_ink_box};
 use crate::ports::Rect;
 
-#[derive(Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct TextAnnotation {
     pub pos: (i32, i32),
     pub text: String,

@@ -1,7 +1,7 @@
 //! Tipos de estilo compartidos por todas las anotaciones (D5).
 
 /// Color RGBA; la opacidad de la herramienta viaja en `a`.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Color {
     pub r: u8,
     pub g: u8,
@@ -32,7 +32,7 @@ impl Color {
 }
 
 /// Estilo de las herramientas geométricas.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub struct Style {
     pub color: Color,
     /// Grosor del trazo en píxeles (mínimo efectivo: 1).
@@ -41,7 +41,7 @@ pub struct Style {
 
 /// Estilo de censura del pixelado (f.25): las dos variantes recorren el
 /// mismo camino (leer el canvas → reescribirlo), solo cambia el filtro.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
 pub enum CensorMode {
     /// Celdas de `block`×`block` aplanadas a su color medio.
     Mosaic { block: u32 },
@@ -55,11 +55,11 @@ pub enum CensorMode {
 /// todo el motor (`draw_text`, `text_ink_box`, `draw_text_rotado`, el número
 /// de los pasos) y tiene que seguir siendo `Copy`. El nombre vive en el
 /// catálogo, que será también quien lo resuelva al serializar (f.31).
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub struct FamiliaId(pub u16);
 
 /// Estilo del texto (f.22).
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, PartialEq, Debug)]
 pub struct TextStyle {
     pub color: Color,
     /// Altura de la fuente en píxeles.

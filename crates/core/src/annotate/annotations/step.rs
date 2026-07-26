@@ -10,7 +10,7 @@ use crate::annotate::style::{Color, FamiliaId, TextStyle};
 use crate::annotate::text::{RenderContext, draw_text, draw_text_rotado, text_ink_box};
 use crate::ports::Rect;
 
-#[derive(Clone)]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct StepAnnotation {
     /// Centro del disco, en píxeles del frame.
     pub center: (i32, i32),

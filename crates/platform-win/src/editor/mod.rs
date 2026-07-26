@@ -17,6 +17,7 @@ mod texto;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use rustcapture_core::annotate::annotations::StepAnnotation;
+use rustcapture_core::annotate::formato;
 use rustcapture_core::output::{ImageFormat, encode};
 use rustcapture_core::ports::{Frame, OutputError, OutputSink, Rect};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
@@ -28,7 +29,10 @@ use windows::Win32::Graphics::Gdi::{
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::DRAWITEMSTRUCT;
-use windows::Win32::UI::Controls::Dialogs::{GetSaveFileNameW, OFN_OVERWRITEPROMPT, OPENFILENAMEW};
+use windows::Win32::UI::Controls::Dialogs::{
+    GetOpenFileNameW, GetSaveFileNameW, OFN_FILEMUSTEXIST, OFN_OVERWRITEPROMPT, OFN_PATHMUSTEXIST,
+    OPENFILENAMEW,
+};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     EnableWindow, GetKeyState, ReleaseCapture, SetCapture, VK_CONTROL, VK_DELETE, VK_ESCAPE,
     VK_SHIFT,
@@ -273,13 +277,18 @@ fn dest_rect(hwnd: HWND, state: &EditorState) -> Rect {
 
 /// Diálogo "Guardar como" → codifica y escribe. Errores → MessageBox.
 /// Devuelve la ruta escrita (limpia el flag de sucio en el llamador).
-fn guardar_como(hwnd: HWND, frame: &Frame) -> Option<String> {
+///
+/// El `.rcap` (f.31) va PRIMERO en el filtro porque es el único formato que
+/// no pierde nada: guarda la base sin anotar más los objetos, no la imagen
+/// horneada.
+fn guardar_como(hwnd: HWND, state: &EditorState) -> Option<String> {
     let mut buffer = [0u16; 260];
     let inicial: Vec<u16> = "captura".encode_utf16().collect();
     buffer[..inicial.len()].copy_from_slice(&inicial);
-    let filtro: Vec<u16> = "PNG (*.png)\0*.png\0JPEG (*.jpg)\0*.jpg\0\0"
-        .encode_utf16()
-        .collect();
+    let filtro: Vec<u16> =
+        "RustCapture re-editable (*.rcap)\0*.rcap\0PNG (*.png)\0*.png\0JPEG (*.jpg)\0*.jpg\0\0"
+            .encode_utf16()
+            .collect();
     let mut ofn = OPENFILENAMEW {
         lStructSize: size_of::<OPENFILENAMEW>() as u32,
         hwndOwner: hwnd,
@@ -297,7 +306,29 @@ fn guardar_como(hwnd: HWND, frame: &Frame) -> Option<String> {
     }
     let fin = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
     let mut ruta = String::from_utf16_lossy(&buffer[..fin]);
-    let format = if ofn.nFilterIndex == 2 {
+
+    // Índice 1 = .rcap: se empaqueta la BASE y el documento, no `committed`.
+    if ofn.nFilterIndex <= 1 {
+        if !ruta.to_ascii_lowercase().ends_with(".rcap") {
+            ruta.push_str(".rcap");
+        }
+        let resultado = formato::empaquetar(&state.base, &state.doc, &state.ctx)
+            .map_err(|e| e.to_string())
+            .and_then(|bytes| std::fs::write(&ruta, bytes).map_err(|e| e.to_string()));
+        return match resultado {
+            Ok(()) => {
+                crate::alerts::capture_beep();
+                Some(ruta)
+            }
+            Err(e) => {
+                crate::alerts::error_box("RustCapture Editor", &format!("{ruta}: {e}"));
+                None
+            }
+        };
+    }
+
+    let frame = &state.committed;
+    let format = if ofn.nFilterIndex == 3 {
         ImageFormat::Jpeg
     } else {
         ImageFormat::Png
@@ -500,6 +531,102 @@ fn rehacer(hwnd: HWND, state: &mut EditorState) {
     }
 }
 
+/// Abre un `.rcap` (f.31): sustituye la captura y el documento actuales.
+fn abrir_rcap(hwnd: HWND, state: &mut EditorState) {
+    texto::commit_text(hwnd, state);
+    // Lo abierto reemplaza lo que hay: si hay cambios sin guardar, confirmar.
+    // SAFETY: MessageBox modal sobre la propia ventana.
+    if state.dirty
+        && unsafe {
+            MessageBoxW(
+                Some(hwnd),
+                w!("Hay cambios sin guardar. ¿Descartarlos y abrir el archivo?"),
+                w!("RustCapture Editor"),
+                MB_YESNO | MB_ICONQUESTION,
+            )
+        } != IDYES
+    {
+        return;
+    }
+    let Some(ruta) = pedir_ruta_rcap(hwnd) else {
+        return;
+    };
+    let bytes = match std::fs::read(&ruta) {
+        Ok(b) => b,
+        Err(e) => {
+            crate::alerts::error_box("RustCapture Editor", &format!("{ruta}: {e}"));
+            return;
+        }
+    };
+    let (base, mut guardado) = match formato::desempaquetar(&bytes) {
+        Ok(v) => v,
+        Err(e) => {
+            crate::alerts::error_box("RustCapture Editor", &format!("{ruta}: {e}"));
+            return;
+        }
+    };
+    // Las familias del archivo van por nombre: hay que reengancharlas al
+    // catálogo de ESTA máquina, cargando las caras que falten.
+    let catalogo = crate::fuentes_ttf::catalogo();
+    let mapa: Vec<_> = guardado
+        .familias
+        .iter()
+        .map(|nombre| {
+            let id = state.ctx.registrar_familia(nombre);
+            if !state.ctx.tiene_familia(id)
+                && let Some(f) = catalogo.iter().find(|f| f.nombre == *nombre)
+            {
+                estado::cargar_familia(&mut state.ctx, id, f);
+            }
+            // Si la fuente no existe aquí, la cadena de respaldo del
+            // RenderContext hará que el texto se vea con la de defecto.
+            id
+        })
+        .collect();
+    guardado.remapear_familias(&mapa);
+
+    let nombre = std::path::Path::new(&ruta)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned());
+    if let Err(e) = state.reemplazar(base, guardado.en_documento(), nombre.clone()) {
+        crate::alerts::error_box("RustCapture Editor", &e.to_string());
+        return;
+    }
+    let titulo = wide(&format!(
+        "{} — RustCapture",
+        nombre.unwrap_or_else(|| "Captura".to_string())
+    ));
+    // SAFETY: título y repintado de la propia ventana.
+    unsafe {
+        _ = SetWindowTextW(hwnd, PCWSTR(titulo.as_ptr()));
+        _ = InvalidateRect(Some(hwnd), None, false);
+    }
+}
+
+/// Diálogo "Abrir" filtrado a `.rcap`.
+fn pedir_ruta_rcap(hwnd: HWND) -> Option<String> {
+    let mut buffer = [0u16; 260];
+    let filtro: Vec<u16> = "RustCapture re-editable (*.rcap)\0*.rcap\0Todos (*.*)\0*.*\0\0"
+        .encode_utf16()
+        .collect();
+    let mut ofn = OPENFILENAMEW {
+        lStructSize: size_of::<OPENFILENAMEW>() as u32,
+        hwndOwner: hwnd,
+        lpstrFilter: PCWSTR(filtro.as_ptr()),
+        nFilterIndex: 1,
+        lpstrFile: windows::core::PWSTR(buffer.as_mut_ptr()),
+        nMaxFile: buffer.len() as u32,
+        Flags: OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST,
+        ..Default::default()
+    };
+    // SAFETY: struct completo con punteros a buffers locales vivos.
+    if !unsafe { GetOpenFileNameW(&mut ofn) }.as_bool() {
+        return None;
+    }
+    let fin = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
+    Some(String::from_utf16_lossy(&buffer[..fin]))
+}
+
 fn on_command(hwnd: HWND, id: u16) {
     let Some(state) = state_mut(hwnd) else {
         return;
@@ -513,10 +640,11 @@ fn on_command(hwnd: HWND, id: u16) {
     match id {
         math::ID_UNDO => deshacer(hwnd, state),
         math::ID_REDO => rehacer(hwnd, state),
+        math::ID_ABRIR => abrir_rcap(hwnd, state),
         math::ID_GUARDAR => {
             // Hornear bajo demanda: committed = base + documento vigente.
             texto::commit_text(hwnd, state);
-            if let Some(ruta) = guardar_como(hwnd, &state.committed) {
+            if let Some(ruta) = guardar_como(hwnd, state) {
                 state.dirty = false;
                 let nombre = std::path::Path::new(&ruta)
                     .file_name()

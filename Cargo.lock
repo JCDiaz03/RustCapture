@@ -220,6 +220,8 @@ dependencies = [
 name = "rustcapture-core"
 version = "0.1.0"
 dependencies = [
+ "crc32fast",
+ "flate2",
  "fontdue",
  "jpeg-encoder",
  "png",

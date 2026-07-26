@@ -11,3 +11,5 @@ time = { workspace = true }
 serde = { workspace = true }
 toml = { workspace = true }
 fontdue = { workspace = true }
+crc32fast = { workspace = true }
+flate2 = { workspace = true }

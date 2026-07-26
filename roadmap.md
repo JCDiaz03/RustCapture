@@ -53,7 +53,7 @@ Objetivo: capturar y sacar por portapapeles/archivo desde barra, hotkey y CLI. P
 - ✅ Selección, movimiento y reedición de objetos (f.52): `Objeto::bounds`/`translate`, `Document::hit_test` y Commands `Move`/`Replace` en el motor (D5+D6), y en el editor la herramienta Selección (clic elige, arrastre mueve, doble clic reedita un texto, marco punteado con 8 asas, Esc suelta) más la goma y Supr que borran el objeto (f.27).
 - ✅ Rotación de objetos (f.53): `Objeto { forma, giro }` con rasterizado girado en las nueve formas y `Command::Rotate`; asa redonda en el recuadro, arrastre circular y salto de 15° con Shift.
 - ⏳ Recorte, redimensionado, nitidez, marca de agua, efectos de borde (f.26, f.28-f.30).
-- ⏳ Formato propio re-editable: PNG base + JSON de objetos en contenedor zip (f.31).
+- ✅ Formato propio re-editable `.rcap` (f.31): ZIP con la base en PNG y los objetos en TOML, con botón Abrir en el editor; cero dependencias nuevas.
 - ⏳ Resto de salidas: impresora, email, editor externo; WebP, BMP, GIF, TIFF, PDF (f.42-f.45).
 
 ## 4c. F3.6 — Manipulación de objetos
@@ -64,6 +64,7 @@ Convierte el editor en un editor de verdad: los objetos colocados dejan de ser i
 - ✅ S-E — Motor cerrado en un enum (`Objeto`), selección, movimiento, reedición de texto y goma (f.52, f.27).
 - ✅ S-F — Rotación con asa y snap (f.53).
 - ✅ S-G — Catálogo de fuentes: familias del sistema y de la carpeta `fonts/` portable, chip de fuente y edición en vivo de fuente/tamaño/negrita/color con la caja abierta (f.54).
+- ✅ S-H — Formato re-editable `.rcap` (f.31): contenedor ZIP propio, documento en TOML, familias por nombre y botón Abrir.
 
 ## 4b. F3.5 — Rediseño visual V4 (D13)
 

@@ -16,6 +16,8 @@ pub enum FrameError {
     SizeMismatch { expected: usize, got: usize },
     #[error("la región {0:?} se sale del frame")]
     OutOfBounds(Rect),
+    #[error("el PNG no se puede leer o no es RGBA de 8 bits")]
+    PngIlegible,
 }
 
 impl Frame {
@@ -56,6 +58,22 @@ impl Frame {
             self.pixels[i + 2],
             self.pixels[i + 3],
         ])
+    }
+
+    /// Decodifica un PNG RGBA8 a `Frame`. Lo usa la carga del formato
+    /// re-editable (f.31); el core no abre el archivo, recibe sus bytes.
+    pub fn from_png(bytes: &[u8]) -> Result<Frame, FrameError> {
+        let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+        let mut reader = decoder.read_info().map_err(|_| FrameError::PngIlegible)?;
+        let mut buffer = vec![0u8; reader.output_buffer_size().unwrap_or(0)];
+        let info = reader
+            .next_frame(&mut buffer)
+            .map_err(|_| FrameError::PngIlegible)?;
+        if info.color_type != png::ColorType::Rgba || info.bit_depth != png::BitDepth::Eight {
+            return Err(FrameError::PngIlegible);
+        }
+        buffer.truncate(info.buffer_size());
+        Frame::new(info.width, info.height, buffer)
     }
 
     /// Copia la subregión `region` (coordenadas locales al frame, origen 0,0).

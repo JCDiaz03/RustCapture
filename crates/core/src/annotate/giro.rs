@@ -10,7 +10,11 @@
 
 /// Y crece hacia abajo, así que un ángulo positivo gira en el sentido de
 /// las agujas del reloj tal y como se ve en pantalla.
-#[derive(Clone, Copy, PartialEq, Debug)]
+///
+/// Al serializar (f.31) se guarda SOLO el ángulo: seno y coseno son caché y
+/// se reconstruyen al leer, así el archivo no depende de su representación.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, PartialEq, Debug)]
+#[serde(into = "f32", from = "f32")]
 pub struct Giro {
     rad: f32,
     sin: f32,
@@ -74,6 +78,18 @@ impl Giro {
 impl Default for Giro {
     fn default() -> Self {
         Self::nulo()
+    }
+}
+
+impl From<f32> for Giro {
+    fn from(rad: f32) -> Self {
+        Giro::new(rad)
+    }
+}
+
+impl From<Giro> for f32 {
+    fn from(g: Giro) -> Self {
+        g.rad
     }
 }
 

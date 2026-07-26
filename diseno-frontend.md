@@ -48,7 +48,7 @@ Ventana principal de edición, redimensionable.
 - Canvas central con ajuste a ventana `(hecho)`; zoom Ctrl+rueda `(diferido)`.
 - Pestañas inferiores: una por captura abierta (miniatura + nombre) `(diferido)`.
 - Barra de estado: dimensiones, % de encaje, formato/archivo y estado de guardado `(hecha)`.
-- Salidas en la toolbar derecha: copiar, guardar-como `(hechas)`, imprimir, email `(D)`; formato propio f.31 `(pendiente)`.
+- Salidas en la toolbar derecha: abrir `.rcap`, copiar, guardar-como `(hechas)`, imprimir, email `(D)`. El «Guardar como» ofrece primero el formato propio re-editable `.rcap` (f.31) y luego PNG/JPEG.
 
 ### V5 — Inicio de grabación (f.37)
 Ventana compacta con dos vistas conmutables por un enlace:
