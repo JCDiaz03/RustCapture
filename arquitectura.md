@@ -60,12 +60,14 @@ El paquete del directorio `/crates/core` se llama `rustcapture-core`: un paquete
 
 ## D5 — Anotación unificada imagen/vídeo (documento + Strategy + Factory)
 
-**Hacemos:** el editor no manipula píxeles; mantiene un documento = lista de objetos de anotación. Trait `Annotation` con `render(&self, canvas: &mut Canvas)`; cada tipo (flecha, texto, pixelado, paso numerado...) es una Strategy, creada vía Factory desde la toolbar o desde deserialización. `Canvas` envuelve un frame RGBA — a la anotación le da igual si es una captura estática o el frame nº 4.812 de un vídeo. Para vídeo, cada objeto lleva un rango temporal `(t_inicio, t_fin)`; el pipeline de re-codificación pregunta por frame "¿qué anotaciones están activas en t?" y las renderiza.
+**Hacemos:** el editor no manipula píxeles; mantiene un documento = lista de objetos de anotación. Trait `Annotation` con `render(&self, canvas: &mut Canvas)`; cada tipo (flecha, texto, pixelado, paso numerado...) es una Strategy en su propio archivo, creada vía Factory desde la toolbar o desde deserialización.
+
+El documento guarda esos tipos en un **enum `Objeto` que cierra la jerarquía**, no en `Box<dyn Annotation>`. El trait sigue siendo el contrato que implementa cada tipo, pero un `dyn` solo ofrece lo que el trait declara, y el editor necesita tres cosas más sobre un objeto ya colocado: saber dónde está (`bounds`, para el hit-test de la selección), moverlo (`translate`) y serializarlo (f.31, que con `dyn` exigiría `typetag` — una dependencia, contra la prioridad de peso mínimo). El enum las da con un `match` en un solo archivo y el compilador señala los que faltan al añadir un tipo. El precio es perder el `dyn` como punto de extensión externo, que no cuesta nada en una app con los plugins descartados (`ideas.md` §Descartado). `Canvas` envuelve un frame RGBA — a la anotación le da igual si es una captura estática o el frame nº 4.812 de un vídeo. Para vídeo, cada objeto lleva un rango temporal `(t_inicio, t_fin)`; el pipeline de re-codificación pregunta por frame "¿qué anotaciones están activas en t?" y las renderiza. El `Canvas` expone lectura además de escritura: la censura (f.25) necesita ver lo que hay debajo, de modo que pixelar tapa también las anotaciones anteriores del z-order, no solo la base.
 **Para conseguir:** un solo motor de anotación para imagen y vídeo (features 20-31 y 38). La decisión más rentable del proyecto en reutilización de código.
 
 ## D6 — Command pattern en el editor
 
-**Hacemos:** cada acción del editor (añadir flecha, mover texto, pixelar zona) es un Command con `apply`/`revert` sobre el documento.
+**Hacemos:** cada acción del editor (añadir flecha, mover texto, pixelar zona) es un Command con `apply`/`revert` sobre el documento. `Move` no guarda la posición anterior: revertir es aplicar el delta negado, así que mover queda deshacible sin estado extra. Un delta nulo no se apila — arrastrar sin mover no debe gastar un undo.
 **Para conseguir:** undo/redo ilimitado casi gratis, y el formato propio re-editable (feature 31) reducido a serializar el documento con serde: PNG base + JSON de objetos en un contenedor zip. Command, Strategy y el formato propio son la misma decisión vista desde tres ángulos.
 
 ## D7 — Eventos con canales (mpsc) para desacoplar entrada de acción

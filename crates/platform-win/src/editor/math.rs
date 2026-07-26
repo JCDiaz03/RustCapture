@@ -23,6 +23,12 @@ pub(crate) enum Herramienta {
     Elipse,
     Lapiz,
     Resaltador,
+    Pasos,
+    Pixelado,
+    /// Elige un objeto ya colocado y lo mueve arrastrando.
+    Seleccion,
+    /// Borra el objeto que se señala (f.27: objetos, no píxeles).
+    Goma,
 }
 
 /// Botón de toolbar ↔ herramienta (None = el id no es una herramienta).
@@ -35,6 +41,10 @@ pub(crate) fn herramienta_de_id(id: u16) -> Option<Herramienta> {
         ID_ELIPSE => Some(Herramienta::Elipse),
         ID_DRAW => Some(Herramienta::Lapiz),
         ID_RESALTADOR => Some(Herramienta::Resaltador),
+        ID_PASOS => Some(Herramienta::Pasos),
+        ID_PIXELADO => Some(Herramienta::Pixelado),
+        ID_SELECT => Some(Herramienta::Seleccion),
+        ID_GOMA => Some(Herramienta::Goma),
         _ => None,
     }
 }
@@ -48,7 +58,17 @@ pub(crate) fn id_de_herramienta(h: Herramienta) -> u16 {
         Herramienta::Elipse => ID_ELIPSE,
         Herramienta::Lapiz => ID_DRAW,
         Herramienta::Resaltador => ID_RESALTADOR,
+        Herramienta::Pasos => ID_PASOS,
+        Herramienta::Pixelado => ID_PIXELADO,
+        Herramienta::Seleccion => ID_SELECT,
+        Herramienta::Goma => ID_GOMA,
     }
+}
+
+/// `true` si la herramienta opera sobre objetos ya colocados en vez de
+/// crear uno nuevo: no dibuja, y su clic hace hit-test.
+pub(crate) fn opera_sobre_objetos(h: Herramienta) -> bool {
+    matches!(h, Herramienta::Seleccion | Herramienta::Goma)
 }
 
 pub(crate) const ID_GUARDAR: u16 = 3001;
@@ -73,12 +93,12 @@ pub(crate) const ID_PRINT: u16 = 3025;
 pub(crate) const ID_EMAIL: u16 = 3026;
 
 /// Toolbar del editor V4: las herramientas del motor D5 en vivo (la
-/// activa se marca con el estado 'activo' del IconButton); pasos,
-/// leyenda, pixelado, goma, crop y resize esperan su fase.
+/// activa se marca con el estado 'activo' del IconButton); leyenda, crop
+/// y resize esperan su fase.
 pub(crate) fn toolbar() -> Vec<Elemento> {
     use Icono::*;
     vec![
-        boton(ID_SELECT, AnnotateSelect, "Selección", false),
+        boton(ID_SELECT, AnnotateSelect, "Selección", true),
         boton(ID_TEXTO, AnnotateText, "Texto", true),
         boton(ID_FLECHA, AnnotateArrow, "Flecha", true),
         boton(ID_LINEA, AnnotateLine, "Línea", true),
@@ -86,10 +106,10 @@ pub(crate) fn toolbar() -> Vec<Elemento> {
         boton(ID_ELIPSE, AnnotateEllipse, "Elipse", true),
         boton(ID_DRAW, AnnotatePencil, "Lápiz", true),
         boton(ID_RESALTADOR, AnnotateHighlight, "Resaltador", true),
-        boton(ID_PASOS, AnnotateSteps, "Pasos numerados", false),
+        boton(ID_PASOS, AnnotateSteps, "Pasos numerados", true),
         boton(ID_LEYENDA, AnnotateCaption, "Leyenda", false),
-        boton(ID_PIXELADO, AnnotatePixelate, "Pixelado", false),
-        boton(ID_GOMA, AnnotateEraser, "Goma", false),
+        boton(ID_PIXELADO, AnnotatePixelate, "Pixelado", true),
+        boton(ID_GOMA, AnnotateEraser, "Goma (Supr)", true),
         Elemento::Separador,
         boton(ID_CROP, AnnotateCrop, "Recortar", false),
         boton(ID_RESIZE, EditResize, "Redimensionar", false),
@@ -101,6 +121,34 @@ pub(crate) fn toolbar() -> Vec<Elemento> {
         boton(ID_GUARDAR, OutputSaveAs, "Guardar como…", true),
         boton(ID_PRINT, OutputPrint, "Imprimir", false),
         boton(ID_EMAIL, OutputEmail, "Email", false),
+    ]
+}
+
+/// Lado LÓGICO de las asas del objeto seleccionado.
+pub(crate) const ASA_LOGICA: i32 = 6;
+
+/// Las 8 asas de un rect (esquinas + puntos medios de cada lado), como
+/// rects de lado `asa` centrados en cada punto. En coordenadas de vista.
+pub(crate) fn asas(caja: Rect, asa: i32) -> [Rect; 8] {
+    let (x0, y0) = (caja.x, caja.y);
+    let (x1, y1) = (
+        caja.x + caja.width as i32,
+        caja.y + caja.height as i32,
+    );
+    let (xm, ym) = ((x0 + x1) / 2, (y0 + y1) / 2);
+    let lado = asa.max(2);
+    let centrada = |cx: i32, cy: i32| {
+        Rect::new(cx - lado / 2, cy - lado / 2, lado as u32, lado as u32)
+    };
+    [
+        centrada(x0, y0),
+        centrada(xm, y0),
+        centrada(x1, y0),
+        centrada(x1, ym),
+        centrada(x1, y1),
+        centrada(xm, y1),
+        centrada(x0, y1),
+        centrada(x0, ym),
     ]
 }
 
@@ -242,8 +290,21 @@ mod tests {
         assert_eq!(
             habilitados,
             vec![
-                ID_TEXTO, ID_FLECHA, ID_LINEA, ID_RECT, ID_ELIPSE, ID_DRAW, ID_RESALTADOR,
-                ID_UNDO, ID_REDO, ID_COPIAR, ID_GUARDAR
+                ID_SELECT,
+                ID_TEXTO,
+                ID_FLECHA,
+                ID_LINEA,
+                ID_RECT,
+                ID_ELIPSE,
+                ID_DRAW,
+                ID_RESALTADOR,
+                ID_PASOS,
+                ID_PIXELADO,
+                ID_GOMA,
+                ID_UNDO,
+                ID_REDO,
+                ID_COPIAR,
+                ID_GUARDAR
             ]
         );
     }
@@ -251,11 +312,41 @@ mod tests {
     #[test]
     fn cada_herramienta_mapea_a_su_boton_y_vuelta() {
         use Herramienta::*;
-        for h in [Texto, Flecha, Linea, Rect, Elipse, Lapiz, Resaltador] {
+        for h in [
+            Texto, Flecha, Linea, Rect, Elipse, Lapiz, Resaltador, Pasos, Pixelado, Seleccion,
+            Goma,
+        ] {
             assert_eq!(herramienta_de_id(id_de_herramienta(h)), Some(h));
         }
         assert_eq!(herramienta_de_id(ID_COPIAR), None);
-        assert_eq!(herramienta_de_id(ID_SELECT), None); // sin lógica aún
+        assert_eq!(herramienta_de_id(ID_LEYENDA), None); // pendiente
+    }
+
+    #[test]
+    fn solo_seleccion_y_goma_operan_sobre_objetos_ya_colocados() {
+        use Herramienta::*;
+        assert!(opera_sobre_objetos(Seleccion) && opera_sobre_objetos(Goma));
+        for h in [Texto, Flecha, Linea, Rect, Elipse, Lapiz, Resaltador, Pasos, Pixelado] {
+            assert!(!opera_sobre_objetos(h), "{h:?} no crea objetos nuevos");
+        }
+    }
+
+    #[test]
+    fn las_asas_rodean_la_caja_centradas_en_sus_puntos() {
+        // Caja 100×50 en (10,20) con asas de 6 → cada asa se centra en su
+        // punto, así que sobresale 3 px de la caja.
+        let a = asas(Rect::new(10, 20, 100, 50), 6);
+        assert_eq!(a[0], Rect::new(7, 17, 6, 6)); // esquina sup. izq.
+        assert_eq!(a[1], Rect::new(57, 17, 6, 6)); // medio superior
+        assert_eq!(a[2], Rect::new(107, 17, 6, 6)); // esquina sup. der.
+        assert_eq!(a[4], Rect::new(107, 67, 6, 6)); // esquina inf. der.
+        assert_eq!(a[6], Rect::new(7, 67, 6, 6)); // esquina inf. izq.
+        // Las 8 son distintas.
+        for i in 0..8 {
+            for j in i + 1..8 {
+                assert_ne!(a[i], a[j], "asas {i} y {j} coinciden");
+            }
+        }
     }
 
     #[test]

@@ -10,7 +10,7 @@
 
 ## 0. Estado general
 
-🔵 **Fase actual: F3 — Editor y anotación (adelantada por decisión de producto).** El ciclo capturar → anotar in situ → guardar/copiar funciona en el editor V4 (F3.5 completada: rediseño visual con tema dual, iconos y fusión de la ventana de dibujo en el editor, D12+D13); quedan las herramientas avanzadas (pasos, leyenda, pixelado, goma), crop/resize, el formato re-editable y el resto de salidas. F1 completada; F2 en pausa (picking de ventana/objeto, mano alzada, región fija, scroll y f.7/f.19).
+🔵 **Fase actual: F3 — Editor y anotación (adelantada por decisión de producto).** El ciclo capturar → anotar in situ → guardar/copiar funciona en el editor V4 (F3.5 completada: rediseño visual con tema dual, iconos y fusión de la ventana de dibujo en el editor, D12+D13); quedan la leyenda, crop/resize, el formato re-editable y el resto de salidas. F1 completada; F2 en pausa (picking de ventana/objeto, mano alzada, región fija, scroll y f.7/f.19).
 
 ## 1. F0 — Diseño y preparación del entorno
 
@@ -49,7 +49,8 @@ Objetivo: capturar y sacar por portapapeles/archivo desde barra, hotkey y CLI. P
 - ✅ Slice C — Motor de anotación con UI (histórico: nació como ventana de dibujo/Ventana2; F3.5/S6 la fusionó dentro del editor).
 - ✅ Modelo de documento: objetos `Annotation`, Strategy y `Canvas` sobre frame RGBA (D5); la toolbar del editor hace de Factory.
 - ✅ Command pattern con undo/redo (D6); sobrevive al guardado (hornear bajo demanda, D12).
-- 🔵 Herramientas (motor en core): texto, flechas, líneas, formas, resaltado y lápiz hechos e integrados en el editor; pasos numerados, leyendas y pixelado pendientes; goma = eliminar objeto (pendiente con la selección).
+- 🔵 Herramientas (motor en core): texto, flechas, líneas, formas, resaltado, lápiz, pixelado/desenfoque, pasos numerados y goma hechos e integrados en el editor; leyendas pendientes.
+- ✅ Selección y movimiento de objetos: `Objeto::bounds`/`translate`, `Document::hit_test` y `Command::Move` en el motor (D5+D6), y en el editor la herramienta Selección (clic elige, arrastre mueve, marco punteado con 8 asas, Esc suelta) más la goma y Supr que borran el objeto (f.27).
 - ⏳ Recorte, redimensionado, nitidez, marca de agua, efectos de borde (f.26, f.28-f.30).
 - ⏳ Formato propio re-editable: PNG base + JSON de objetos en contenedor zip (f.31).
 - ⏳ Resto de salidas: impresora, email, editor externo; WebP, BMP, GIF, TIFF, PDF (f.42-f.45).

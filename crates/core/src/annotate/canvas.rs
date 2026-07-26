@@ -23,6 +23,18 @@ impl<'a> Canvas<'a> {
         self.frame.height
     }
 
+    /// Lee el píxel YA compuesto (base + anotaciones anteriores); `None`
+    /// fuera de rango. Lo necesitan las anotaciones que censuran lo que
+    /// tienen debajo (pixelado/desenfoque): ven el z-order, no la base.
+    pub fn pixel(&self, x: i32, y: i32) -> Option<Color> {
+        if x < 0 || y < 0 || x as u32 >= self.frame.width || y as u32 >= self.frame.height {
+            return None;
+        }
+        let i = (y as usize * self.frame.width as usize + x as usize) * 4;
+        let px = &self.frame.pixels[i..i + 4];
+        Some(Color::rgba(px[0], px[1], px[2], px[3]))
+    }
+
     /// Mezcla `color` sobre el píxel; fuera de rango no hace nada.
     pub fn blend_pixel(&mut self, x: i32, y: i32, color: Color) {
         if x < 0 || y < 0 || x as u32 >= self.frame.width || y as u32 >= self.frame.height {
@@ -59,6 +71,18 @@ mod tests {
         let [r, g, b, a] = frame.pixel(0, 0).unwrap();
         assert!((127..=129).contains(&r) && r == g && g == b);
         assert_eq!(a, 255);
+    }
+
+    #[test]
+    fn pixel_lee_lo_ya_compuesto_y_fuera_de_rango_es_none() {
+        let mut frame = Frame::filled(2, 2, [10, 20, 30, 255]);
+        let mut canvas = Canvas::new(&mut frame);
+        assert_eq!(canvas.pixel(1, 1), Some(Color::rgba(10, 20, 30, 255)));
+        // Lo que se escribe se vuelve a leer: la censura ve el z-order.
+        canvas.blend_pixel(0, 0, Color::rgb(200, 0, 0));
+        assert_eq!(canvas.pixel(0, 0), Some(Color::rgba(200, 0, 0, 255)));
+        assert_eq!(canvas.pixel(-1, 0), None);
+        assert_eq!(canvas.pixel(0, 2), None);
     }
 
     #[test]

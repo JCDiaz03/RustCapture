@@ -7,6 +7,7 @@
 > - Conserva el porqué, no el cuándo: documenta decisiones e inspiraciones (los "robos" llevan su origen); fuera anécdotas.
 > - Estado, no fecha: si una característica está incompleta, márcala con un estado — `(parcial)`, `(no cableado)`, `(mock)` —, nunca con una fecha.
 > - Una sola casa por dato: aquí vive el QUÉ (características). El CÓMO (decisiones de arquitectura) → ver `arquitectura.md`; no duplicar, resumir + enlazar.
+> - Numeración APPEND-ONLY: los `f.N` se referencian desde los otros tres documentos, así que una característica nueva se añade con el siguiente número libre dentro de su sección, aunque rompa el orden correlativo. Nunca se renumera lo existente.
 > - §2 Fase 2 son ideas diferidas sin comprometer; no mezclar con la versión 1. §Descartado conserva los "no" y su porqué.
 
 Proyecto: **RustCapture** — herramienta de captura estilo FastStone Capture (todo en uno, ligera, portable-first).
@@ -55,6 +56,7 @@ Desarrollo: IA-first (Opus 4.8 / Fable 5).
 29. Marca de agua.
 30. Efectos de borde (sombra, borde rasgado).
 31. Formato propio sin pérdida que conserva los objetos de anotación editables junto a la imagen (equivalente al `.fsc` de FastStone).
+52. Selección y reedición de objetos ya colocados: la herramienta de selección elige el objeto de más arriba del z-order, el arrastre lo reposiciona y el doble clic sobre un texto reabre su caja para cambiarlo. Todo son Commands deshacibles como cualquier otra edición.
 
 ### Grabación de vídeo
 

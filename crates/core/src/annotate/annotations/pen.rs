@@ -6,6 +6,7 @@ use crate::annotate::shapes;
 use crate::annotate::style::Style;
 use crate::annotate::text::RenderContext;
 
+#[derive(Clone)]
 pub struct PenAnnotation {
     pub points: Vec<(i32, i32)>,
     pub style: Style,

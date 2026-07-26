@@ -4,10 +4,12 @@
 //! la herramienta activa.
 
 use rustcapture_core::annotate::annotations::{
-    Annotation, ArrowAnnotation, EllipseAnnotation, HighlightAnnotation, LineAnnotation,
-    PenAnnotation, RectAnnotation,
+    ArrowAnnotation, EllipseAnnotation, HighlightAnnotation, LineAnnotation, PenAnnotation,
+    PixelateAnnotation, RectAnnotation,
 };
-use rustcapture_core::annotate::{Color, Document, History, RenderContext, Style};
+use rustcapture_core::annotate::{
+    CensorMode, Color, Document, History, Objeto, RenderContext, Style,
+};
 use rustcapture_core::ports::Frame;
 use windows::Win32::Foundation::RECT;
 
@@ -22,13 +24,127 @@ use super::texto::EditBox;
 
 pub(super) const GROSORES: [u32; 5] = [1, 2, 3, 5, 8];
 pub(super) const TAMANOS: [f32; 5] = [12.0, 16.0, 20.0, 28.0, 36.0];
+/// Bloque del mosaico / radio del desenfoque ofrecidos en la barra (f.25).
+pub(super) const CENSURAS: [u32; 5] = [4, 8, 12, 16, 24];
 /// Color de anotación por defecto: el acento cálido del diseño (#D83B01).
 pub(super) const COLOR_DEFECTO: Color = Color::rgb(0xD8, 0x3B, 0x01);
+
+/// Propiedades de dibujo que edita la barra contextual (f.22-f.25).
+/// Agrupadas para que `props::chips` no crezca en parámetros sueltos.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(super) struct Propiedades {
+    pub color: Color,
+    pub grosor: u32,
+    pub tamano_texto: f32,
+    pub negrita: bool,
+    /// Modo de censura vigente, con su parámetro en px dentro.
+    pub censura: CensorMode,
+}
+
+impl Default for Propiedades {
+    fn default() -> Self {
+        Self {
+            color: COLOR_DEFECTO,
+            grosor: 3,
+            tamano_texto: 20.0,
+            negrita: false,
+            censura: CensorMode::Mosaic { block: 8 },
+        }
+    }
+}
+
+impl Propiedades {
+    /// px del modo vigente: bloque del mosaico o radio del desenfoque.
+    pub(super) fn censura_px(&self) -> u32 {
+        match self.censura {
+            CensorMode::Mosaic { block } => block,
+            CensorMode::Blur { radius } => radius,
+        }
+    }
+
+    pub(super) fn con_censura_px(&mut self, px: u32) {
+        self.censura = match self.censura {
+            CensorMode::Mosaic { .. } => CensorMode::Mosaic { block: px },
+            CensorMode::Blur { .. } => CensorMode::Blur { radius: px },
+        };
+    }
+
+    /// Conmuta mosaico ↔ desenfoque conservando los px elegidos.
+    pub(super) fn alternar_censura(&mut self) {
+        let px = self.censura_px();
+        self.censura = match self.censura {
+            CensorMode::Mosaic { .. } => CensorMode::Blur { radius: px },
+            CensorMode::Blur { .. } => CensorMode::Mosaic { block: px },
+        };
+    }
+}
+
+/// Numeración de los pasos (f.23) en paralelo a las pilas de `History`:
+/// cada comando aplicado apunta el número vigente ANTES de él, así
+/// deshacer un paso devuelve su número al siguiente que se coloque.
+/// Sus tres métodos se llaman EXACTAMENTE donde se llama a `History`.
+pub(super) struct ContadorPasos {
+    siguiente: u32,
+    antes: Vec<u32>,
+    despues: Vec<u32>,
+}
+
+impl ContadorPasos {
+    pub(super) fn new() -> Self {
+        Self {
+            siguiente: 1,
+            antes: Vec::new(),
+            despues: Vec::new(),
+        }
+    }
+
+    pub(super) fn siguiente(&self) -> u32 {
+        self.siguiente
+    }
+
+    /// Un comando se aplicó con éxito; `fue_paso` gasta un número.
+    pub(super) fn aplicado(&mut self, fue_paso: bool) {
+        self.antes.push(self.siguiente);
+        if fue_paso {
+            self.siguiente += 1;
+        }
+        self.despues.clear();
+    }
+
+    pub(super) fn deshecho(&mut self) {
+        if let Some(previo) = self.antes.pop() {
+            self.despues.push(self.siguiente);
+            self.siguiente = previo;
+        }
+    }
+
+    pub(super) fn rehecho(&mut self) {
+        if let Some(posterior) = self.despues.pop() {
+            self.antes.push(self.siguiente);
+            self.siguiente = posterior;
+        }
+    }
+}
 
 pub(super) struct DragState {
     pub start: (i32, i32),
     pub current: (i32, i32),
     pub points: Vec<(i32, i32)>,
+}
+
+/// Arrastre de un objeto ya colocado (herramienta Selección). El objeto
+/// NO se toca mientras dura: el desplazamiento se pinta como preview y
+/// solo se convierte en `Command::Move` al soltar (D6).
+pub(super) struct MoverDrag {
+    pub index: usize,
+    pub start: (i32, i32),
+    pub current: (i32, i32),
+}
+
+impl MoverDrag {
+    pub(super) fn delta(&self) -> (i32, i32) {
+        (self.current.0 - self.start.0, self.current.1 - self.start.1)
+    }
 }
 
 pub(super) struct EditorState {
@@ -46,11 +162,16 @@ pub(super) struct EditorState {
     pub ctx: RenderContext,
     pub tiene_fuente: bool,
     pub herramienta: Herramienta,
-    pub color: Color,
-    pub grosor: u32,
-    pub tamano_texto: f32,
-    pub negrita: bool,
+    pub props: Propiedades,
+    /// Numeración de pasos, sincronizada con `history`.
+    pub pasos: ContadorPasos,
     pub drag: Option<DragState>,
+    /// Índice del objeto seleccionado. Se limpia en cada undo/redo: esas
+    /// operaciones reordenan los índices (deshacer un borrado reinserta y
+    /// desplaza a los de detrás) y un índice rancio señalaría a otro
+    /// objeto. Limpiar es predecible y cuesta nada.
+    pub seleccionado: Option<usize>,
+    pub mover: Option<MoverDrag>,
     pub edit: Option<EditBox>,
     pub cerrado: bool,
     /// Documento cambiado desde el último guardado/copiado.
@@ -82,11 +203,11 @@ impl EditorState {
             ctx,
             tiene_fuente,
             herramienta: Herramienta::Flecha,
-            color: COLOR_DEFECTO,
-            grosor: 3,
-            tamano_texto: 20.0,
-            negrita: false,
+            props: Propiedades::default(),
+            pasos: ContadorPasos::new(),
             drag: None,
+            seleccionado: None,
+            mover: None,
             edit: None,
             cerrado: false,
             dirty: false,
@@ -104,36 +225,60 @@ impl EditorState {
         copy_frame_to_dib(&self.committed, &mut self.committed_dib);
     }
 
-    /// Anotación provisional del arrastre actual (None con Texto o sin drag).
-    pub(super) fn anotacion_en_curso(&self) -> Option<Box<dyn Annotation>> {
+    /// Objeto provisional del arrastre actual (None con las herramientas
+    /// de un clic o sin arrastre).
+    pub(super) fn anotacion_en_curso(&self) -> Option<Objeto> {
         let drag = self.drag.as_ref()?;
-        let style = Style { color: self.color, thickness: self.grosor };
+        let style = Style {
+            color: self.props.color,
+            thickness: self.props.grosor,
+        };
         let rect = crate::overlay::math::rect_between(drag.start, drag.current);
         Some(match self.herramienta {
-            Herramienta::Rect => Box::new(RectAnnotation { rect, style }),
-            Herramienta::Elipse => Box::new(EllipseAnnotation { rect, style }),
-            Herramienta::Linea => Box::new(LineAnnotation {
+            Herramienta::Rect => RectAnnotation { rect, style }.into(),
+            Herramienta::Elipse => EllipseAnnotation { rect, style }.into(),
+            Herramienta::Linea => LineAnnotation {
                 from: drag.start,
                 to: drag.current,
                 style,
-            }),
-            Herramienta::Flecha => Box::new(ArrowAnnotation {
+            }
+            .into(),
+            Herramienta::Flecha => ArrowAnnotation {
                 from: drag.start,
                 to: drag.current,
                 style,
-            }),
+            }
+            .into(),
             // PENDIENTE(rendimiento): clona los puntos en cada repintado
             // del arrastre (O(n) por frame). Solo importa con trazos
             // larguísimos; arreglable pasando el builder a préstamos.
-            Herramienta::Lapiz => Box::new(PenAnnotation {
+            Herramienta::Lapiz => PenAnnotation {
                 points: drag.points.clone(),
                 style,
-            }),
-            Herramienta::Resaltador => Box::new(HighlightAnnotation {
+            }
+            .into(),
+            Herramienta::Resaltador => HighlightAnnotation {
                 rect,
-                color: Color::rgba(self.color.r, self.color.g, self.color.b, 128),
-            }),
-            Herramienta::Texto => return None,
+                color: Color::rgba(
+                    self.props.color.r,
+                    self.props.color.g,
+                    self.props.color.b,
+                    128,
+                ),
+            }
+            .into(),
+            Herramienta::Pixelado => PixelateAnnotation {
+                rect,
+                mode: self.props.censura,
+            }
+            .into(),
+            // Texto y Pasos se colocan con un clic, no con arrastre; la
+            // selección y la goma no crean objetos, operan sobre los que ya
+            // hay (su arrastre lo lleva `mover`, no este).
+            Herramienta::Texto
+            | Herramienta::Pasos
+            | Herramienta::Seleccion
+            | Herramienta::Goma => return None,
         })
     }
 }
@@ -147,5 +292,95 @@ fn cargar_contexto() -> (RenderContext, bool) {
             Err(_) => (RenderContext::sin_fuente(), false),
         },
         _ => (RenderContext::sin_fuente(), false),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn las_propiedades_por_defecto_son_las_del_diseno() {
+        let p = Propiedades::default();
+        assert_eq!(p.color, COLOR_DEFECTO);
+        assert_eq!(p.grosor, 3);
+        assert_eq!(p.tamano_texto, 20.0);
+        assert!(!p.negrita);
+        assert_eq!(p.censura, CensorMode::Mosaic { block: 8 });
+        assert_eq!(p.censura_px(), 8);
+    }
+
+    #[test]
+    fn alternar_la_censura_conserva_los_px() {
+        let mut p = Propiedades::default();
+        p.con_censura_px(16);
+        p.alternar_censura();
+        assert_eq!(p.censura, CensorMode::Blur { radius: 16 });
+        assert_eq!(p.censura_px(), 16);
+        p.alternar_censura();
+        assert_eq!(p.censura, CensorMode::Mosaic { block: 16 });
+    }
+
+    #[test]
+    fn los_pasos_empiezan_en_uno_y_avanzan_al_colocarse() {
+        let mut c = ContadorPasos::new();
+        assert_eq!(c.siguiente(), 1);
+        c.aplicado(true);
+        assert_eq!(c.siguiente(), 2);
+        c.aplicado(true);
+        assert_eq!(c.siguiente(), 3);
+    }
+
+    #[test]
+    fn otras_herramientas_no_consumen_numero() {
+        let mut c = ContadorPasos::new();
+        c.aplicado(false); // una flecha
+        assert_eq!(c.siguiente(), 1);
+    }
+
+    #[test]
+    fn deshacer_un_paso_devuelve_su_numero_y_rehacer_lo_vuelve_a_gastar() {
+        let mut c = ContadorPasos::new();
+        c.aplicado(true);
+        assert_eq!(c.siguiente(), 2);
+        c.deshecho();
+        assert_eq!(c.siguiente(), 1);
+        c.rehecho();
+        assert_eq!(c.siguiente(), 2);
+    }
+
+    #[test]
+    fn deshacer_comandos_intercalados_mantiene_la_numeracion() {
+        let mut c = ContadorPasos::new();
+        c.aplicado(false); // flecha
+        c.aplicado(true); // paso 1
+        c.aplicado(false); // rectángulo
+        assert_eq!(c.siguiente(), 2);
+        c.deshecho(); // deshace el rectángulo
+        assert_eq!(c.siguiente(), 2);
+        c.deshecho(); // deshace el paso 1
+        assert_eq!(c.siguiente(), 1);
+        c.deshecho(); // deshace la flecha
+        assert_eq!(c.siguiente(), 1);
+    }
+
+    #[test]
+    fn un_comando_nuevo_invalida_el_rehacer_del_contador() {
+        let mut c = ContadorPasos::new();
+        c.aplicado(true);
+        c.deshecho();
+        assert_eq!(c.siguiente(), 1);
+        c.aplicado(true); // se coloca otro paso: reusa el 1
+        assert_eq!(c.siguiente(), 2);
+        c.rehecho(); // ya no hay nada que rehacer
+        assert_eq!(c.siguiente(), 2);
+    }
+
+    #[test]
+    fn deshacer_sin_historia_no_rompe_el_contador() {
+        let mut c = ContadorPasos::new();
+        c.deshecho();
+        c.rehecho();
+        assert_eq!(c.siguiente(), 1);
     }
 }

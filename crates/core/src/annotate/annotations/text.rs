@@ -5,6 +5,7 @@ use crate::annotate::canvas::Canvas;
 use crate::annotate::style::TextStyle;
 use crate::annotate::text::{RenderContext, draw_text};
 
+#[derive(Clone)]
 pub struct TextAnnotation {
     pub pos: (i32, i32),
     pub text: String,

@@ -7,6 +7,7 @@ use crate::annotate::style::Style;
 use crate::annotate::text::RenderContext;
 use crate::ports::Rect;
 
+#[derive(Clone)]
 pub struct RectAnnotation {
     pub rect: Rect,
     pub style: Style,

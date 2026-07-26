@@ -42,8 +42,9 @@ Ventana fullscreen sin bordes sobre el frame congelado (oscurecido ~30 % fuera d
 
 ### V4 — Editor (f.21-f.31) `(parcial: chrome + anotación in situ implementados)`
 Ventana principal de edición, redimensionable.
-- Toolbar superior: selección `(D)`, texto, flecha, línea, forma, elipse, lápiz, resaltador `(hechas)`, pasos numerados, leyenda, pixelado, goma `(D)` | recorte, redimensionar `(D)` | deshacer/rehacer `(hechos)`.
-- Barra de propiedades contextual bajo la toolbar (grosor, color, tamaño de fuente, negrita) `(hecha, con chips + menú popup)`.
+- Toolbar superior: selección, texto, flecha, línea, forma, elipse, lápiz, resaltador, pasos numerados, pixelado, goma `(hechas)`, leyenda `(D)` | recorte, redimensionar `(D)` | deshacer/rehacer `(hechos)`.
+- Objeto seleccionado: marco punteado de 1 px en el acento `#0067C0` con 8 asas de 6 px lógicos (esquinas y puntos medios); clic elige el de más arriba del z-order, arrastre lo mueve, Esc suelta, Supr o la goma lo borran `(hecho)`.
+- Barra de propiedades contextual bajo la toolbar (grosor, color, tamaño de fuente, negrita, modo de censura y bloque/radio) `(hecha, con chips + menú popup)`.
 - Canvas central con ajuste a ventana `(hecho)`; zoom Ctrl+rueda `(diferido)`.
 - Pestañas inferiores: una por captura abierta (miniatura + nombre) `(diferido)`.
 - Barra de estado: dimensiones, % de encaje, formato/archivo y estado de guardado `(hecha)`.

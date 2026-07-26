@@ -45,6 +45,53 @@ impl Rect {
             && other.bottom() <= self.bottom()
     }
 
+    /// `true` si el punto cae dentro (bordes izquierdo/superior incluidos,
+    /// derecho/inferior excluidos). Un rect vacío no contiene nada.
+    pub fn contains_point(&self, p: (i32, i32)) -> bool {
+        !self.is_empty()
+            && (p.0 as i64) >= self.x as i64
+            && (p.0 as i64) < self.right()
+            && (p.1 as i64) >= self.y as i64
+            && (p.1 as i64) < self.bottom()
+    }
+
+    /// Copia desplazada por `delta`, saturando en los extremos de `i32`.
+    pub fn translated(&self, delta: (i32, i32)) -> Rect {
+        Rect::new(
+            self.x.saturating_add(delta.0),
+            self.y.saturating_add(delta.1),
+            self.width,
+            self.height,
+        )
+    }
+
+    /// Rect que encierra todos los puntos, ensanchado `margen` px por lado
+    /// (el grosor del trazo sobresale del eje geométrico). Vacío sin puntos.
+    pub fn bounding(puntos: &[(i32, i32)], margen: u32) -> Rect {
+        let Some(&(x0, y0)) = puntos.first() else {
+            return Rect::new(0, 0, 0, 0);
+        };
+        let (mut min_x, mut min_y, mut max_x, mut max_y) = (x0, y0, x0, y0);
+        for &(x, y) in &puntos[1..] {
+            min_x = min_x.min(x);
+            min_y = min_y.min(y);
+            max_x = max_x.max(x);
+            max_y = max_y.max(y);
+        }
+        let m = margen as i64;
+        let izq = min_x as i64 - m;
+        let arr = min_y as i64 - m;
+        // +1 porque los bordes son inclusivos y el ancho es exclusivo.
+        let ancho = (max_x as i64 + m + 1 - izq).max(1);
+        let alto = (max_y as i64 + m + 1 - arr).max(1);
+        Rect::new(
+            izq.clamp(i32::MIN as i64, i32::MAX as i64) as i32,
+            arr.clamp(i32::MIN as i64, i32::MAX as i64) as i32,
+            ancho.min(u32::MAX as i64) as u32,
+            alto.min(u32::MAX as i64) as u32,
+        )
+    }
+
     /// Área común, o `None` si no se solapan o alguno es vacío.
     pub fn intersection(&self, other: &Rect) -> Option<Rect> {
         let x = self.x.max(other.x);
@@ -92,6 +139,48 @@ mod tests {
         let a = Rect::new(0, 0, 10, 10);
         let b = Rect::new(20, 20, 5, 5);
         assert_eq!(a.intersection(&b), None);
+    }
+
+    #[test]
+    fn contains_point_incluye_origen_y_excluye_el_borde_lejano() {
+        let r = Rect::new(10, 20, 5, 3);
+        assert!(r.contains_point((10, 20)));
+        assert!(r.contains_point((14, 22)));
+        assert!(!r.contains_point((15, 22))); // derecho exclusivo
+        assert!(!r.contains_point((14, 23))); // inferior exclusivo
+        assert!(!r.contains_point((9, 20)));
+        // Origen negativo (monitor a la izquierda del primario).
+        let n = Rect::new(-100, -50, 10, 10);
+        assert!(n.contains_point((-100, -50)) && n.contains_point((-91, -41)));
+        assert!(!n.contains_point((-101, -50)));
+        // Vacío: nada dentro.
+        assert!(!Rect::new(0, 0, 0, 5).contains_point((0, 0)));
+    }
+
+    #[test]
+    fn translated_desplaza_sin_cambiar_el_tamano() {
+        assert_eq!(
+            Rect::new(10, 20, 5, 3).translated((-15, 4)),
+            Rect::new(-5, 24, 5, 3)
+        );
+    }
+
+    #[test]
+    fn bounding_encierra_los_puntos_con_su_margen() {
+        // Sin margen: un solo punto da un rect de 1×1.
+        assert_eq!(Rect::bounding(&[(7, 9)], 0), Rect::new(7, 9, 1, 1));
+        // Dos puntos en diagonal, bordes inclusivos.
+        assert_eq!(
+            Rect::bounding(&[(10, 4), (2, 20)], 0),
+            Rect::new(2, 4, 9, 17)
+        );
+        // Con margen 3 crece 3 px por lado.
+        assert_eq!(
+            Rect::bounding(&[(10, 10), (10, 10)], 3),
+            Rect::new(7, 7, 7, 7)
+        );
+        // Sin puntos: vacío.
+        assert!(Rect::bounding(&[], 5).is_empty());
     }
 
     #[test]

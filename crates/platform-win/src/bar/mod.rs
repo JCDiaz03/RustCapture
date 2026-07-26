@@ -112,7 +112,10 @@ impl Bar {
                 WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
                 class,
                 w!("RustCapture"),
-                WS_POPUP | WS_VISIBLE,
+                // CLIPCHILDREN: el volcado del back buffer no debe pintar
+                // encima de los IconButton hijos (si lo hace, se repintan
+                // solos y aparece un parpadeo tipo z-fighting).
+                WS_POPUP | WS_VISIBLE | WS_CLIPCHILDREN,
                 40,
                 40,
                 600,

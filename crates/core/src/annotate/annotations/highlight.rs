@@ -7,6 +7,7 @@ use crate::annotate::style::Color;
 use crate::annotate::text::RenderContext;
 use crate::ports::Rect;
 
+#[derive(Clone)]
 pub struct HighlightAnnotation {
     pub rect: Rect,
     /// Color CON alfa (típico: amarillo a 128).

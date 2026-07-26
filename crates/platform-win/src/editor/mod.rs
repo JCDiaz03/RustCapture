@@ -16,6 +16,7 @@ mod texto;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use rustcapture_core::annotate::annotations::StepAnnotation;
 use rustcapture_core::output::{ImageFormat, encode};
 use rustcapture_core::ports::{Frame, OutputError, OutputSink, Rect};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
@@ -28,7 +29,7 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::DRAWITEMSTRUCT;
 use windows::Win32::UI::Controls::Dialogs::{GetSaveFileNameW, OFN_OVERWRITEPROMPT, OPENFILENAMEW};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    EnableWindow, GetKeyState, ReleaseCapture, SetCapture, VK_CONTROL, VK_ESCAPE,
+    EnableWindow, GetKeyState, ReleaseCapture, SetCapture, VK_CONTROL, VK_DELETE, VK_ESCAPE,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{PCWSTR, w};
@@ -39,7 +40,7 @@ use crate::ui::botonera;
 use crate::ui::{boton, fuentes, lienzo, theme, ventana};
 use crate::util::{punto, wide};
 
-use estado::{DragState, EditorState};
+use estado::{DragState, EditorState, MoverDrag};
 use texto::{ID_EDIT_TEXT, WM_APP_CANCEL_TEXT};
 
 /// Mensaje al wndproc de la barra: wparam = `Box<Frame>` crudo, el
@@ -118,6 +119,10 @@ fn run(frame: Frame) -> windows::core::Result<()> {
         let instance = GetModuleHandleW(None)?;
         let class = w!("RustCaptureEditor");
         let wc = WNDCLASSW {
+            // CS_DBLCLKS: sin él Windows manda dos WM_LBUTTONDOWN en vez de
+            // WM_LBUTTONDBLCLK, y el doble clic para reeditar texto no
+            // llegaría nunca.
+            style: CS_DBLCLKS,
             lpfnWndProc: Some(wndproc),
             hInstance: instance.into(),
             lpszClassName: class,
@@ -132,7 +137,11 @@ fn run(frame: Frame) -> windows::core::Result<()> {
             WINDOW_EX_STYLE::default(),
             class,
             PCWSTR(titulo.as_ptr()),
-            WS_OVERLAPPEDWINDOW | WS_VISIBLE,
+            // CLIPCHILDREN: el volcado del back buffer no debe pintar encima
+            // de los botones hijos de la toolbar. Sin esto, cada repintado
+            // los tapa y ellos se repintan después — el parpadeo que se ve
+            // al mover un objeto, donde se invalida en cada mousemove.
+            WS_OVERLAPPEDWINDOW | WS_VISIBLE | WS_CLIPCHILDREN,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
             win_w,
@@ -208,10 +217,28 @@ fn cambiar_herramienta(hwnd: HWND, state: &mut EditorState, nueva: math::Herrami
     if state.herramienta != nueva {
         let previa = state.herramienta;
         state.herramienta = nueva;
+        // La selección solo tiene sentido con las herramientas que operan
+        // sobre objetos; al pasar a dibujar se suelta.
+        if !math::opera_sobre_objetos(nueva) {
+            state.seleccionado = None;
+            state.mover = None;
+        }
         marcar_herramienta(hwnd, Some(previa), nueva);
         // La property bar cambia con la herramienta.
         // SAFETY: invalidación de la propia ventana.
         unsafe { _ = InvalidateRect(Some(hwnd), None, false) };
+    }
+}
+
+/// Zona a invalidar durante un arrastre: solo el canvas. Invalidar la
+/// ventana entera repintaría toolbar y status en cada `WM_MOUSEMOVE` sin
+/// que hayan cambiado.
+fn zona_canvas(destino: Rect) -> RECT {
+    RECT {
+        left: destino.x,
+        top: destino.y,
+        right: destino.x + destino.width as i32,
+        bottom: destino.y + destino.height as i32,
     }
 }
 
@@ -294,9 +321,70 @@ fn guardar_como(hwnd: HWND, frame: &Frame) -> Option<String> {
     }
 }
 
+/// Coloca un paso numerado en el punto del clic (f.23): sin arrastre, con
+/// el número que toca según el contador sincronizado con la historia.
+fn colocar_paso(hwnd: HWND, state: &mut EditorState, pf: (i32, i32)) {
+    let objeto = StepAnnotation {
+        center: pf,
+        number: state.pasos.siguiente(),
+        color: state.props.color,
+        font_size: state.props.tamano_texto,
+    };
+    if state.history.apply(
+        &mut state.doc,
+        rustcapture_core::annotate::Command::add(objeto.into()),
+    ) {
+        state.pasos.aplicado(true);
+        state.refresh_committed();
+        state.dirty = true;
+        // SAFETY: invalidación de la propia ventana.
+        unsafe { _ = InvalidateRect(Some(hwnd), None, false) };
+    }
+}
+
+/// Borra un objeto entero (f.27: objetos, no píxeles). La goma y Supr
+/// pasan por aquí.
+fn borrar_objeto(hwnd: HWND, state: &mut EditorState, index: usize) {
+    if state.history.apply(
+        &mut state.doc,
+        rustcapture_core::annotate::Command::remove(index),
+    ) {
+        state.pasos.aplicado(false);
+        // Los índices de detrás se han desplazado: la selección muere.
+        state.seleccionado = None;
+        state.refresh_committed();
+        state.dirty = true;
+        // SAFETY: invalidación de la propia ventana.
+        unsafe { _ = InvalidateRect(Some(hwnd), None, false) };
+    }
+}
+
+/// Cierra el arrastre de un objeto convirtiéndolo en un `Command::Move`
+/// (un solo comando por arrastre, no uno por `WM_MOUSEMOVE`).
+fn soltar_movimiento(hwnd: HWND, state: &mut EditorState) {
+    let Some(mover) = state.mover.take() else {
+        return;
+    };
+    // SAFETY: se liberó la captura que tomó el WM_LBUTTONDOWN.
+    unsafe { _ = ReleaseCapture() };
+    // Un delta nulo lo rechaza el propio Command: no gasta un undo.
+    if state.history.apply(
+        &mut state.doc,
+        rustcapture_core::annotate::Command::move_by(mover.index, mover.delta()),
+    ) {
+        state.pasos.aplicado(false);
+        state.refresh_committed();
+        state.dirty = true;
+    }
+    // SAFETY: invalidación de la propia ventana.
+    unsafe { _ = InvalidateRect(Some(hwnd), None, false) };
+}
+
 fn deshacer(hwnd: HWND, state: &mut EditorState) {
     texto::commit_text(hwnd, state);
     if state.history.undo(&mut state.doc) {
+        state.pasos.deshecho();
+        state.seleccionado = None;
         state.refresh_committed();
         state.dirty = true;
         // SAFETY: invalidación de la propia ventana.
@@ -307,6 +395,8 @@ fn deshacer(hwnd: HWND, state: &mut EditorState) {
 fn rehacer(hwnd: HWND, state: &mut EditorState) {
     texto::commit_text(hwnd, state);
     if state.history.redo(&mut state.doc) {
+        state.pasos.rehecho();
+        state.seleccionado = None;
         state.refresh_committed();
         state.dirty = true;
         // SAFETY: invalidación de la propia ventana.
@@ -397,18 +487,67 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     let destino = dest_rect(hwnd, state);
                     let tam = (state.committed.width, state.committed.height);
                     if let Some(pf) = math::view_to_frame(p, destino, tam) {
-                        if state.herramienta == math::Herramienta::Texto {
-                            texto::commit_text(hwnd, state);
-                            if let Some(state) = state_mut(hwnd) {
-                                texto::abrir_edit(hwnd, state, pf, destino);
+                        // Texto y Pasos se colocan con un clic; el resto
+                        // arranca un arrastre con preview en vivo.
+                        match state.herramienta {
+                            math::Herramienta::Texto => {
+                                texto::commit_text(hwnd, state);
+                                if let Some(state) = state_mut(hwnd) {
+                                    texto::abrir_edit(hwnd, state, pf, destino);
+                                }
                             }
-                        } else {
-                            state.drag = Some(DragState {
-                                start: pf,
-                                current: pf,
-                                points: vec![pf],
-                            });
-                            SetCapture(hwnd);
+                            math::Herramienta::Pasos => colocar_paso(hwnd, state, pf),
+                            math::Herramienta::Seleccion => {
+                                // Clic en un objeto lo elige y arma el
+                                // arrastre; en vacío, deselecciona.
+                                let indice = state.doc.hit_test(pf, &state.ctx);
+                                state.seleccionado = indice;
+                                if let Some(index) = indice {
+                                    state.mover = Some(MoverDrag {
+                                        index,
+                                        start: pf,
+                                        current: pf,
+                                    });
+                                    SetCapture(hwnd);
+                                }
+                                _ = InvalidateRect(Some(hwnd), None, false);
+                            }
+                            math::Herramienta::Goma => {
+                                if let Some(index) = state.doc.hit_test(pf, &state.ctx) {
+                                    borrar_objeto(hwnd, state, index);
+                                }
+                            }
+                            _ => {
+                                state.drag = Some(DragState {
+                                    start: pf,
+                                    current: pf,
+                                    points: vec![pf],
+                                });
+                                SetCapture(hwnd);
+                            }
+                        }
+                    }
+                }
+                LRESULT(0)
+            }
+            WM_LBUTTONDBLCLK => {
+                // Doble clic con Selección sobre un texto → reeditarlo.
+                // El WM_LBUTTONDOWN previo ya armó un arrastre y tomó la
+                // captura: hay que deshacer las dos cosas o el texto se
+                // movería al soltar.
+                if let Some(state) = state_mut(hwnd)
+                    && state.herramienta == math::Herramienta::Seleccion
+                {
+                    let destino = dest_rect(hwnd, state);
+                    let tam = (state.committed.width, state.committed.height);
+                    if let Some(pf) = math::view_to_frame(punto(lparam), destino, tam)
+                        && let Some(index) = state.doc.hit_test(pf, &state.ctx)
+                    {
+                        state.mover = None;
+                        _ = ReleaseCapture();
+                        state.seleccionado = Some(index);
+                        if texto::abrir_reedicion(hwnd, state, index, destino) {
+                            _ = InvalidateRect(Some(hwnd), None, false);
                         }
                     }
                 }
@@ -418,6 +557,16 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 if let Some(state) = state_mut(hwnd) {
                     let destino = dest_rect(hwnd, state);
                     let tam = (state.committed.width, state.committed.height);
+                    // Arrastre de un objeto: solo mueve el preview.
+                    if state.mover.is_some()
+                        && let Some(pf) = math::view_to_frame(punto(lparam), destino, tam)
+                        && let Some(mover) = state.mover.as_mut()
+                    {
+                        mover.current = pf;
+                        let zona = zona_canvas(destino);
+                        _ = InvalidateRect(Some(hwnd), Some(&zona), false);
+                        return LRESULT(0);
+                    }
                     if state.drag.is_some()
                         && let Some(pf) = math::view_to_frame(punto(lparam), destino, tam)
                         && let Some(drag) = state.drag.as_mut()
@@ -427,12 +576,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             drag.points.push(pf);
                         }
                         // Solo cambia el canvas: invalidar su rect encajado.
-                        let zona = RECT {
-                            left: destino.x,
-                            top: destino.y,
-                            right: destino.x + destino.width as i32,
-                            bottom: destino.y + destino.height as i32,
-                        };
+                        let zona = zona_canvas(destino);
                         _ = InvalidateRect(Some(hwnd), Some(&zona), false);
                     }
                 }
@@ -440,13 +584,22 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             }
             WM_LBUTTONUP => {
                 if let Some(state) = state_mut(hwnd)
+                    && state.mover.is_some()
+                {
+                    soltar_movimiento(hwnd, state);
+                    return LRESULT(0);
+                }
+                if let Some(state) = state_mut(hwnd)
                     && state.drag.is_some()
                 {
                     _ = ReleaseCapture();
-                    if let Some(anotacion) = state.anotacion_en_curso() {
-                        state
-                            .history
-                            .apply(&mut state.doc, rustcapture_core::annotate::Command::add(anotacion));
+                    if let Some(anotacion) = state.anotacion_en_curso()
+                        && state.history.apply(
+                            &mut state.doc,
+                            rustcapture_core::annotate::Command::add(anotacion),
+                        )
+                    {
+                        state.pasos.aplicado(false);
                         state.refresh_committed();
                         state.dirty = true;
                     }
@@ -460,10 +613,18 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                     let ctrl = GetKeyState(VK_CONTROL.0 as i32) < 0;
                     match wparam.0 as u16 {
                         k if k == VK_ESCAPE.0 => {
-                            // Esc solo cancela la caja de texto abierta.
+                            // Esc cancela la caja de texto abierta o, si no
+                            // hay ninguna, suelta la selección.
                             if let Some(edit) = state.edit.take() {
                                 texto::cerrar_edit(edit);
                                 _ = InvalidateRect(Some(hwnd), None, false);
+                            } else if state.seleccionado.take().is_some() {
+                                _ = InvalidateRect(Some(hwnd), None, false);
+                            }
+                        }
+                        k if k == VK_DELETE.0 => {
+                            if let Some(index) = state.seleccionado {
+                                borrar_objeto(hwnd, state, index);
                             }
                         }
                         k if ctrl && k == b'Z' as u16 => deshacer(hwnd, state),
@@ -546,6 +707,96 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
     }
 }
 
+/// Marco punteado + 8 asas del objeto seleccionado, en el color de acento.
+/// Se pinta en coordenadas de VISTA (la caja del objeto está en píxeles del
+/// frame, así que se mapea con `frame_to_view`); durante el arrastre sigue
+/// al objeto sumándole el delta.
+fn pintar_seleccion(dc: HDC, state: &EditorState, destino: Rect, escala: Escala) {
+    let Some(index) = state.seleccionado else {
+        return;
+    };
+    let Some(objeto) = state.doc.get(index) else {
+        return;
+    };
+    let mut caja = objeto.bounds(&state.ctx);
+    if caja.is_empty() {
+        return;
+    }
+    if let Some(mover) = state.mover.as_ref().filter(|m| m.index == index) {
+        caja = caja.translated(mover.delta());
+    }
+    let tam = (state.committed.width, state.committed.height);
+    // Esquinas del objeto → vista. La inferior-derecha usa el borde
+    // exclusivo para que el marco encierre el último píxel escalado.
+    let (vx0, vy0) = math::frame_to_view((caja.x, caja.y), destino, tam);
+    let (vx1, vy1) = math::frame_to_view(
+        (caja.right() as i32, caja.bottom() as i32),
+        destino,
+        tam,
+    );
+    let vista = Rect::new(
+        vx0,
+        vy0,
+        (vx1 - vx0).max(1) as u32,
+        (vy1 - vy0).max(1) as u32,
+    );
+    let paleta = theme::actual().paleta();
+    let grosor = escala.px(1).max(1);
+    let guion = escala.px(4).max(2);
+    // SAFETY: DC del back buffer vivo; brochas efímeras de `lienzo`.
+    unsafe {
+        marco_punteado(dc, vista, grosor, guion, paleta.acento);
+        for asa in math::asas(vista, escala.px(math::ASA_LOGICA)) {
+            let rc = RECT {
+                left: asa.x,
+                top: asa.y,
+                right: asa.right() as i32,
+                bottom: asa.bottom() as i32,
+            };
+            lienzo::rellenar(dc, &rc, paleta.acento);
+            lienzo::marco(dc, &rc, paleta.superficie);
+        }
+    }
+}
+
+/// Marco de guiones dibujado con rectángulos (GDI puro, sin pens punteados:
+/// `PS_DOT` ignora el grosor > 1 y a 200 % se vería mal).
+unsafe fn marco_punteado(
+    dc: HDC,
+    caja: Rect,
+    grosor: i32,
+    guion: i32,
+    color: windows::Win32::Foundation::COLORREF,
+) {
+    let paso = guion * 2;
+    let (x0, y0) = (caja.x, caja.y);
+    let (x1, y1) = (caja.right() as i32, caja.bottom() as i32);
+    let mut x = x0;
+    while x < x1 {
+        let fin = (x + guion).min(x1);
+        for y in [y0, y1 - grosor] {
+            lienzo::rellenar(
+                dc,
+                &RECT { left: x, top: y, right: fin, bottom: y + grosor },
+                color,
+            );
+        }
+        x += paso;
+    }
+    let mut y = y0;
+    while y < y1 {
+        let fin = (y + guion).min(y1);
+        for x in [x0, x1 - grosor] {
+            lienzo::rellenar(
+                dc,
+                &RECT { left: x, top: y, right: x + grosor, bottom: fin },
+                color,
+            );
+        }
+        y += paso;
+    }
+}
+
 /// Compone todo el cliente (toolbar, property bar, canvas anotable y
 /// status bar) en un back buffer y lo vuelca de un BitBlt.
 fn pintar(hwnd: HWND, hdc: HDC, state: &mut EditorState) -> windows::core::Result<()> {
@@ -621,11 +872,24 @@ fn pintar(hwnd: HWND, hdc: HDC, state: &mut EditorState) -> windows::core::Resul
         };
         if !encajado.is_empty() {
             let dib = if let Some(anotacion) = state.anotacion_en_curso() {
+                // Dibujando: comprometido + la anotación provisional.
                 state.preview.pixels.copy_from_slice(&state.committed.pixels);
                 {
                     let mut canvas = rustcapture_core::annotate::Canvas::new(&mut state.preview);
                     anotacion.render(&mut canvas, &state.ctx);
                 }
+                crate::gdi::copy_frame_to_dib(&state.preview, &mut state.preview_dib);
+                &state.preview_dib
+            } else if let Some(mover) = state.mover.as_ref().filter(|m| m.delta() != (0, 0)) {
+                // Moviendo: se re-hornea el documento entero con ese objeto
+                // desplazado. Es lo más caro del editor (un re-horneado por
+                // WM_MOUSEMOVE) y está asumido: si se nota con muchos
+                // objetos, cachear el documento sin el objeto movido.
+                let (index, delta) = (mover.index, mover.delta());
+                state.preview.pixels.copy_from_slice(&state.base.pixels);
+                state
+                    .doc
+                    .render_onto_moved(&mut state.preview, &state.ctx, index, delta);
                 crate::gdi::copy_frame_to_dib(&state.preview, &mut state.preview_dib);
                 &state.preview_dib
             } else {
@@ -647,6 +911,17 @@ fn pintar(hwnd: HWND, hdc: HDC, state: &mut EditorState) -> windows::core::Resul
                 state.committed.height as i32,
                 SRCCOPY,
             );
+        }
+
+        // Marco y asas del objeto seleccionado, sobre la imagen.
+        if !encajado.is_empty() {
+            let destino = Rect::new(
+                encajado.x,
+                encajado.y + reparto.props_fin,
+                encajado.width,
+                encajado.height,
+            );
+            pintar_seleccion(back_dc_h, state, destino, escala);
         }
 
         // Status bar: dimensiones · % de encaje · destino/estado.

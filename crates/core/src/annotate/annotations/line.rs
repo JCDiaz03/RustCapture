@@ -6,6 +6,7 @@ use crate::annotate::shapes;
 use crate::annotate::style::Style;
 use crate::annotate::text::RenderContext;
 
+#[derive(Clone)]
 pub struct LineAnnotation {
     pub from: (i32, i32),
     pub to: (i32, i32),

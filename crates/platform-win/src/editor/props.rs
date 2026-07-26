@@ -3,7 +3,7 @@
 //! las opciones o el diálogo de color. Sustituye a la barra inferior de
 //! swatches de la antigua ventana de dibujo.
 
-use rustcapture_core::annotate::Color;
+use rustcapture_core::annotate::{CensorMode, Color};
 use windows::Win32::Foundation::{COLORREF, HWND, POINT, RECT, SIZE};
 use windows::Win32::Graphics::Gdi::{
     ClientToScreen, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, DrawTextW, GetTextExtentPoint32W,
@@ -19,7 +19,7 @@ use windows::core::PCWSTR;
 use crate::dpi::Escala;
 use crate::ui::{fuentes, lienzo, theme};
 
-use super::estado::{EditorState, GROSORES, TAMANOS};
+use super::estado::{CENSURAS, EditorState, GROSORES, Propiedades, TAMANOS};
 use super::math::Herramienta;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -28,6 +28,8 @@ pub(super) enum Accion {
     MenuTamano,
     ToggleNegrita,
     ElegirColor,
+    ToggleCensura,
+    MenuCensuraPx,
 }
 
 #[derive(PartialEq, Debug)]
@@ -38,36 +40,64 @@ pub(super) struct Chip {
     pub accion: Accion,
 }
 
+/// Etiqueta del chip de modo y nombre del parámetro en px.
+fn texto_censura(modo: CensorMode) -> (&'static str, &'static str) {
+    match modo {
+        CensorMode::Mosaic { .. } => ("Modo: mosaico", "Bloque"),
+        CensorMode::Blur { .. } => ("Modo: desenfoque", "Radio"),
+    }
+}
+
 /// Composición pura de los chips para la herramienta activa.
-pub(super) fn chips(
-    herramienta: Herramienta,
-    grosor: u32,
-    tamano_texto: f32,
-    negrita: bool,
-) -> Vec<Chip> {
+pub(super) fn chips(herramienta: Herramienta, p: &Propiedades) -> Vec<Chip> {
     let color = Chip {
         etiqueta: "Color".to_string(),
         muestra_color: true,
         accion: Accion::ElegirColor,
     };
     match herramienta {
+        // Operan sobre objetos existentes: no hay nada que preconfigurar.
+        Herramienta::Seleccion | Herramienta::Goma => Vec::new(),
         Herramienta::Texto => vec![
             Chip {
-                etiqueta: format!("Tamaño {}", tamano_texto as u32),
+                etiqueta: format!("Tamaño {}", p.tamano_texto as u32),
                 muestra_color: false,
                 accion: Accion::MenuTamano,
             },
             Chip {
-                etiqueta: format!("Negrita: {}", if negrita { "sí" } else { "no" }),
+                etiqueta: format!("Negrita: {}", if p.negrita { "sí" } else { "no" }),
                 muestra_color: false,
                 accion: Accion::ToggleNegrita,
             },
             color,
         ],
         Herramienta::Resaltador => vec![color],
+        Herramienta::Pixelado => {
+            let (modo, px) = texto_censura(p.censura);
+            vec![
+                Chip {
+                    etiqueta: modo.to_string(),
+                    muestra_color: false,
+                    accion: Accion::ToggleCensura,
+                },
+                Chip {
+                    etiqueta: format!("{px} {} px", p.censura_px()),
+                    muestra_color: false,
+                    accion: Accion::MenuCensuraPx,
+                },
+            ]
+        }
+        Herramienta::Pasos => vec![
+            Chip {
+                etiqueta: format!("Tamaño {}", p.tamano_texto as u32),
+                muestra_color: false,
+                accion: Accion::MenuTamano,
+            },
+            color,
+        ],
         _ => vec![
             Chip {
-                etiqueta: format!("Grosor {grosor} px"),
+                etiqueta: format!("Grosor {} px", p.grosor),
                 muestra_color: false,
                 accion: Accion::MenuGrosor,
             },
@@ -85,7 +115,7 @@ pub(super) fn pintar(
     escala: Escala,
 ) -> Vec<(RECT, Accion)> {
     let paleta = theme::actual().paleta();
-    let lista = chips(state.herramienta, state.grosor, state.tamano_texto, state.negrita);
+    let lista = chips(state.herramienta, &state.props);
     let mut zonas = Vec::with_capacity(lista.len());
     // SAFETY: DC del back buffer vivo; brochas propias liberadas aquí.
     unsafe {
@@ -123,9 +153,9 @@ pub(super) fn pintar(
                     dc,
                     &caja,
                     COLORREF(
-                        state.color.r as u32
-                            | (state.color.g as u32) << 8
-                            | (state.color.b as u32) << 16,
+                        state.props.color.r as u32
+                            | (state.props.color.g as u32) << 8
+                            | (state.props.color.b as u32) << 16,
                     ),
                 );
                 lienzo::marco(dc, &caja, paleta.borde);
@@ -150,21 +180,29 @@ pub(super) fn on_click(hwnd: HWND, state: &mut EditorState, p: (i32, i32)) -> bo
     match accion {
         Accion::MenuGrosor => {
             let etiquetas: Vec<String> = GROSORES.iter().map(|g| format!("{g} px")).collect();
-            let actual = GROSORES.iter().position(|&g| g == state.grosor);
+            let actual = GROSORES.iter().position(|&g| g == state.props.grosor);
             if let Some(i) = menu_de_opciones(hwnd, p, &etiquetas, actual) {
-                state.grosor = GROSORES[i];
+                state.props.grosor = GROSORES[i];
             }
         }
         Accion::MenuTamano => {
             let etiquetas: Vec<String> =
                 TAMANOS.iter().map(|t| format!("{} px", *t as u32)).collect();
-            let actual = TAMANOS.iter().position(|&t| t == state.tamano_texto);
+            let actual = TAMANOS.iter().position(|&t| t == state.props.tamano_texto);
             if let Some(i) = menu_de_opciones(hwnd, p, &etiquetas, actual) {
-                state.tamano_texto = TAMANOS[i];
+                state.props.tamano_texto = TAMANOS[i];
             }
         }
-        Accion::ToggleNegrita => state.negrita = !state.negrita,
+        Accion::ToggleNegrita => state.props.negrita = !state.props.negrita,
         Accion::ElegirColor => elegir_color(hwnd, state),
+        Accion::ToggleCensura => state.props.alternar_censura(),
+        Accion::MenuCensuraPx => {
+            let etiquetas: Vec<String> = CENSURAS.iter().map(|c| format!("{c} px")).collect();
+            let actual = CENSURAS.iter().position(|&c| c == state.props.censura_px());
+            if let Some(i) = menu_de_opciones(hwnd, p, &etiquetas, actual) {
+                state.props.con_censura_px(CENSURAS[i]);
+            }
+        }
     }
     // SAFETY: invalidación de la propia ventana (repinta los chips).
     unsafe { _ = InvalidateRect(Some(hwnd), None, false) };
@@ -206,8 +244,11 @@ fn menu_de_opciones(hwnd: HWND, p: (i32, i32), etiquetas: &[String], marcado: Op
 /// Diálogo de color estándar de Windows.
 fn elegir_color(hwnd: HWND, state: &mut EditorState) {
     static mut CUSTOM: [COLORREF; 16] = [COLORREF(0x00FFFFFF); 16];
-    let actual =
-        COLORREF(state.color.r as u32 | (state.color.g as u32) << 8 | (state.color.b as u32) << 16);
+    let actual = COLORREF(
+        state.props.color.r as u32
+            | (state.props.color.g as u32) << 8
+            | (state.props.color.b as u32) << 16,
+    );
     // SAFETY: struct completo; CUSTOM es estático y solo se usa aquí, en
     // el hilo de UI.
     unsafe {
@@ -221,7 +262,7 @@ fn elegir_color(hwnd: HWND, state: &mut EditorState) {
         };
         if ChooseColorW(&mut cc).as_bool() {
             let v = cc.rgbResult.0;
-            state.color = Color::rgb(
+            state.props.color = Color::rgb(
                 (v & 0xFF) as u8,
                 ((v >> 8) & 0xFF) as u8,
                 ((v >> 16) & 0xFF) as u8,
@@ -236,6 +277,7 @@ mod tests {
 
     #[test]
     fn las_formas_llevan_grosor_y_color() {
+        let p = Propiedades::default();
         for h in [
             Herramienta::Flecha,
             Herramienta::Linea,
@@ -243,7 +285,7 @@ mod tests {
             Herramienta::Elipse,
             Herramienta::Lapiz,
         ] {
-            let chips = chips(h, 3, 20.0, false);
+            let chips = chips(h, &p);
             assert_eq!(chips.len(), 2, "{h:?}");
             assert_eq!(chips[0].etiqueta, "Grosor 3 px");
             assert_eq!(chips[0].accion, Accion::MenuGrosor);
@@ -253,7 +295,12 @@ mod tests {
 
     #[test]
     fn el_texto_lleva_tamano_negrita_y_color() {
-        let chips = chips(Herramienta::Texto, 3, 28.0, true);
+        let p = Propiedades {
+            tamano_texto: 28.0,
+            negrita: true,
+            ..Propiedades::default()
+        };
+        let chips = chips(Herramienta::Texto, &p);
         assert_eq!(chips.len(), 3);
         assert_eq!(chips[0].etiqueta, "Tamaño 28");
         assert_eq!(chips[1].etiqueta, "Negrita: sí");
@@ -263,8 +310,46 @@ mod tests {
 
     #[test]
     fn el_resaltador_solo_lleva_color() {
-        let chips = chips(Herramienta::Resaltador, 3, 20.0, false);
+        let chips = chips(Herramienta::Resaltador, &Propiedades::default());
         assert_eq!(chips.len(), 1);
         assert!(chips[0].muestra_color);
+    }
+
+    #[test]
+    fn seleccion_y_goma_no_llevan_chips() {
+        let p = Propiedades::default();
+        assert!(chips(Herramienta::Seleccion, &p).is_empty());
+        assert!(chips(Herramienta::Goma, &p).is_empty());
+    }
+
+    #[test]
+    fn el_pixelado_lleva_modo_y_px_pero_no_color() {
+        let chips = chips(Herramienta::Pixelado, &Propiedades::default());
+        assert_eq!(chips.len(), 2);
+        assert_eq!(chips[0].etiqueta, "Modo: mosaico");
+        assert_eq!(chips[0].accion, Accion::ToggleCensura);
+        assert_eq!(chips[1].etiqueta, "Bloque 8 px");
+        assert_eq!(chips[1].accion, Accion::MenuCensuraPx);
+        assert!(!chips[0].muestra_color && !chips[1].muestra_color);
+    }
+
+    #[test]
+    fn el_desenfoque_etiqueta_los_px_como_radio() {
+        let p = Propiedades {
+            censura: CensorMode::Blur { radius: 12 },
+            ..Propiedades::default()
+        };
+        let chips = chips(Herramienta::Pixelado, &p);
+        assert_eq!(chips[0].etiqueta, "Modo: desenfoque");
+        assert_eq!(chips[1].etiqueta, "Radio 12 px");
+    }
+
+    #[test]
+    fn los_pasos_llevan_tamano_y_color() {
+        let chips = chips(Herramienta::Pasos, &Propiedades::default());
+        assert_eq!(chips.len(), 2);
+        assert_eq!(chips[0].etiqueta, "Tamaño 20");
+        assert_eq!(chips[0].accion, Accion::MenuTamano);
+        assert!(chips[1].muestra_color);
     }
 }

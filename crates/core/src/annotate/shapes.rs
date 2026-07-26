@@ -28,6 +28,55 @@ pub(crate) fn stamp_disc(canvas: &mut Canvas, cx: i32, cy: i32, thickness: u32, 
     }
 }
 
+/// Disco relleno con antialiasing: cada píxel se mezcla UNA vez con el
+/// alfa de su cobertura (supermuestreo 4×4 solo en la corona del borde),
+/// así el contorno sale suave y sin las manchas del estampado solapado
+/// que describe la cabecera de este módulo.
+pub(crate) fn fill_disc_aa(canvas: &mut Canvas, centro: (i32, i32), radio: u32, color: Color) {
+    if radio == 0 {
+        return;
+    }
+    let r = f64::from(radio);
+    // Centro geométrico = centro del píxel `centro`.
+    let (cx, cy) = (f64::from(centro.0) + 0.5, f64::from(centro.1) + 0.5);
+    let borde = radio as i32 + 1;
+    for py in centro.1 - borde..=centro.1 + borde {
+        for px in centro.0 - borde..=centro.0 + borde {
+            let dx = f64::from(px) + 0.5 - cx;
+            let dy = f64::from(py) + 0.5 - cy;
+            let d = (dx * dx + dy * dy).sqrt();
+            // Interior y exterior se resuelven sin muestrear.
+            let cobertura = if d <= r - 0.75 {
+                1.0
+            } else if d >= r + 0.75 {
+                0.0
+            } else {
+                cobertura_4x4(px, py, cx, cy, r)
+            };
+            if cobertura > 0.0 {
+                let a = (f64::from(color.a) * cobertura).round() as u8;
+                canvas.blend_pixel(px, py, Color::rgba(color.r, color.g, color.b, a));
+            }
+        }
+    }
+}
+
+/// Fracción de las 16 submuestras del píxel que caen dentro del disco.
+fn cobertura_4x4(px: i32, py: i32, cx: f64, cy: f64, r: f64) -> f64 {
+    let mut dentro = 0;
+    for sy in 0..4 {
+        for sx in 0..4 {
+            let x = f64::from(px) + (f64::from(sx) + 0.5) / 4.0;
+            let y = f64::from(py) + (f64::from(sy) + 0.5) / 4.0;
+            let (dx, dy) = (x - cx, y - cy);
+            if dx * dx + dy * dy <= r * r {
+                dentro += 1;
+            }
+        }
+    }
+    f64::from(dentro) / 16.0
+}
+
 /// Bresenham con estampado de disco por punto.
 pub(crate) fn draw_line(canvas: &mut Canvas, a: (i32, i32), b: (i32, i32), style: &Style) {
     let (mut x, mut y) = a;
@@ -195,6 +244,27 @@ mod tests {
         let [r, g, b, _] = frame.pixel(6, 6).unwrap();
         assert!((127..=129).contains(&r) && (127..=129).contains(&g) && b == 0);
         assert_eq!(frame.pixel(4, 4), Some(NEGRO));
+    }
+
+    #[test]
+    fn el_disco_aa_rellena_el_centro_y_suaviza_el_borde() {
+        let mut frame = Frame::filled(20, 20, NEGRO);
+        fill_disc_aa(&mut Canvas::new(&mut frame), (10, 10), 5, ROJO);
+        // Centro y radio interior: rojo puro.
+        assert!(es_rojo(&frame, 10, 10) && es_rojo(&frame, 10, 7));
+        // Justo en el borde: cobertura parcial → rojo a medias.
+        let [r, ..] = frame.pixel(10, 5).unwrap();
+        assert!(r > 0 && r < 255, "el borde no tiene AA (r = {r})");
+        // Fuera del disco: intacto.
+        assert_eq!(frame.pixel(10, 3), Some(NEGRO));
+        assert_eq!(frame.pixel(3, 3), Some(NEGRO));
+    }
+
+    #[test]
+    fn el_disco_de_radio_cero_es_noop() {
+        let mut frame = Frame::filled(6, 6, NEGRO);
+        fill_disc_aa(&mut Canvas::new(&mut frame), (3, 3), 0, ROJO);
+        assert_eq!(frame, Frame::filled(6, 6, NEGRO));
     }
 
     #[test]
