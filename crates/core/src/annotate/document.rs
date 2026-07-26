@@ -58,6 +58,27 @@ impl Document {
         }
     }
 
+    /// Hermano de `render_onto_moved` para el arrastre del asa de rotación:
+    /// pinta el objeto `index` con un giro extra sin tocar el documento.
+    pub fn render_onto_rotated(
+        &self,
+        frame: &mut Frame,
+        ctx: &RenderContext,
+        index: usize,
+        delta_rad: f32,
+    ) {
+        let mut canvas = Canvas::new(frame);
+        for (i, objeto) in self.objetos.iter().enumerate() {
+            if i == index && delta_rad != 0.0 {
+                let mut girado = objeto.clone();
+                girado.rotar(delta_rad);
+                girado.render(&mut canvas, ctx);
+            } else {
+                objeto.render(&mut canvas, ctx);
+            }
+        }
+    }
+
     pub fn get(&self, index: usize) -> Option<&Objeto> {
         self.objetos.get(index)
     }
@@ -90,6 +111,12 @@ pub enum Command {
         index: usize,
         delta: (i32, i32),
     },
+    /// Gira un objeto ya colocado. Como `Move`, revertir es aplicar el
+    /// delta negado: no guarda el ángulo anterior.
+    Rotate {
+        index: usize,
+        delta_rad: f32,
+    },
     /// Sustituye un objeto conservando su POSICIÓN en el z-order (borrar y
     /// volver a añadir lo mandaría al frente). Lo usa la reedición de un
     /// texto ya colocado.
@@ -116,6 +143,10 @@ impl Command {
 
     pub fn move_by(index: usize, delta: (i32, i32)) -> Self {
         Command::Move { index, delta }
+    }
+
+    pub fn rotate_by(index: usize, delta_rad: f32) -> Self {
+        Command::Rotate { index, delta_rad }
     }
 
     pub fn replace(index: usize, nuevo: Objeto) -> Self {
@@ -148,6 +179,15 @@ impl Command {
                 Some(_) if *delta == (0, 0) => false,
                 Some(o) => {
                     o.translate(*delta);
+                    true
+                }
+                None => false,
+            },
+            Command::Rotate { index, delta_rad } => match doc.objetos.get_mut(*index) {
+                // Un giro nulo no es una edición: no se apila.
+                Some(_) if *delta_rad == 0.0 => false,
+                Some(o) => {
+                    o.rotar(*delta_rad);
                     true
                 }
                 None => false,
@@ -185,6 +225,11 @@ impl Command {
             Command::Move { index, delta } => {
                 if let Some(o) = doc.objetos.get_mut(*index) {
                     o.translate((-delta.0, -delta.1));
+                }
+            }
+            Command::Rotate { index, delta_rad } => {
+                if let Some(o) = doc.objetos.get_mut(*index) {
+                    o.rotar(-*delta_rad);
                 }
             }
             Command::Replace {
@@ -374,6 +419,67 @@ mod tests {
 
         assert!(historia.redo(&mut doc));
         assert_eq!(doc.get(0).unwrap().bounds(&ctx), movido);
+    }
+
+    /// Caja alargada: al girar 90° la caja pasa de ancha a alta.
+    fn alargada() -> Objeto {
+        crate::annotate::annotations::RectAnnotation {
+            rect: Rect::new(4, 4, 12, 2),
+            style: Style {
+                color: Color::rgb(255, 0, 0),
+                thickness: 1,
+            },
+        }
+        .into()
+    }
+
+    #[test]
+    fn rotate_gira_el_objeto_y_undo_lo_devuelve() {
+        let ctx = RenderContext::sin_fuente();
+        let mut doc = Document::new();
+        let mut historia = History::new();
+        historia.apply(&mut doc, Command::add(alargada()));
+        let antes = doc.get(0).unwrap().bounds(&ctx);
+        assert!(antes.width > antes.height);
+
+        assert!(historia.apply(&mut doc, Command::rotate_by(0, std::f32::consts::FRAC_PI_2)));
+        let girado = doc.get(0).unwrap().bounds(&ctx);
+        assert!(girado.height > girado.width, "no giró: {girado:?}");
+
+        assert!(historia.undo(&mut doc));
+        assert_eq!(doc.get(0).unwrap().bounds(&ctx), antes);
+        assert!(historia.redo(&mut doc));
+        assert_eq!(doc.get(0).unwrap().bounds(&ctx), girado);
+    }
+
+    #[test]
+    fn un_rotate_invalido_o_nulo_no_se_apila() {
+        let mut doc = Document::new();
+        let mut historia = History::new();
+        historia.apply(&mut doc, Command::add(caja(2)));
+        assert!(!historia.apply(&mut doc, Command::rotate_by(9, 0.5)));
+        // Soltar el asa sin haber girado no debe gastar un undo.
+        assert!(!historia.apply(&mut doc, Command::rotate_by(0, 0.0)));
+        assert!(historia.undo(&mut doc));
+        assert!(!historia.can_undo());
+    }
+
+    #[test]
+    fn el_preview_pinta_girado_sin_tocar_el_documento() {
+        let ctx = RenderContext::sin_fuente();
+        let mut doc = Document::new();
+        let mut historia = History::new();
+        historia.apply(&mut doc, Command::add(alargada()));
+        let antes = doc.get(0).unwrap().bounds(&ctx);
+
+        let mut frame = Frame::filled(24, 24, [0, 0, 0, 255]);
+        doc.render_onto_rotated(&mut frame, &ctx, 0, std::f32::consts::FRAC_PI_2);
+        // Girado 90° alrededor de (9.5, 4.5): pinta por encima y por debajo
+        // de la franja original, no en sus extremos horizontales.
+        assert!(!es_rojo(&frame, 4, 4) && !es_rojo(&frame, 15, 4));
+        assert!((0..24).any(|y| es_rojo(&frame, 9, y) || es_rojo(&frame, 10, y)));
+        // El documento sigue intacto: el giro aún no existe como Command.
+        assert_eq!(doc.get(0).unwrap().bounds(&ctx), antes);
     }
 
     #[test]

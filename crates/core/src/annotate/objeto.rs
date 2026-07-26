@@ -1,28 +1,33 @@
-//! Objeto de anotación: el enum que CIERRA la jerarquía del trait
-//! `Annotation` (D5).
+//! Objeto colocado en el documento: una `Forma` más su `Giro`.
 //!
+//! `Forma` es el enum que CIERRA la jerarquía del trait `Annotation` (D5).
 //! Por qué un enum y no `Box<dyn Annotation>`: un `dyn` solo ofrece lo que
 //! declara el trait, y el editor necesita tres cosas que el trait no puede
 //! dar sin renunciar al objeto — saber dónde está cada objeto para el
-//! hit-test (`bounds`), moverlo (`translate`) y serializarlo para el
-//! formato re-editable (f.31, que con `dyn` exigiría `typetag`, es decir
-//! una dependencia, contra la prioridad de peso mínimo). Al ser una app
-//! cerrada (los plugins están descartados en `ideas.md`), cerrar la lista
-//! no cuesta nada: cada tipo sigue en su archivo con su `impl Annotation`
-//! y aquí solo se delega con un `match`.
+//! hit-test (`bounds`), transformarlo (`translate`/`rotar`) y serializarlo
+//! para el formato re-editable (f.31, que con `dyn` exigiría `typetag`, es
+//! decir una dependencia, contra la prioridad de peso mínimo). Al ser una
+//! app cerrada (los plugins están descartados en `ideas.md`), cerrar la
+//! lista no cuesta nada: cada tipo sigue en su archivo con su
+//! `impl Annotation` y aquí solo se delega con un `match`.
+//!
+//! El giro vive en `Objeto` y no dentro de cada forma porque es propiedad
+//! de la COLOCACIÓN, no del tipo: así `rotar` es una línea en vez de nueve
+//! y f.31 serializa un campo en vez de nueve.
 
 use crate::annotate::annotations::{
-    Annotation, ArrowAnnotation, EllipseAnnotation, HighlightAnnotation, LineAnnotation,
-    PenAnnotation, PixelateAnnotation, RectAnnotation, StepAnnotation, TextAnnotation,
+    ArrowAnnotation, EllipseAnnotation, HighlightAnnotation, LineAnnotation, PenAnnotation,
+    PixelateAnnotation, RectAnnotation, StepAnnotation, TextAnnotation,
 };
 use crate::annotate::canvas::Canvas;
-use crate::annotate::text::{RenderContext, text_ink_box};
+use crate::annotate::giro::Giro;
+use crate::annotate::text::RenderContext;
 use crate::ports::Rect;
 
-/// Un objeto del documento. Añadir un tipo = un archivo en `annotations/`
-/// + una variante aquí; el compilador señala los `match` que faltan.
+/// Forma de un objeto. Añadir un tipo = un archivo en `annotations/` + una
+/// variante aquí; el compilador señala los `match` que faltan.
 #[derive(Clone)]
-pub enum Objeto {
+pub enum Forma {
     Flecha(ArrowAnnotation),
     Elipse(EllipseAnnotation),
     Resaltador(HighlightAnnotation),
@@ -34,100 +39,114 @@ pub enum Objeto {
     Texto(TextAnnotation),
 }
 
-impl Objeto {
-    /// Delega en la Strategy del tipo concreto (D5 intacto).
-    pub fn render(&self, canvas: &mut Canvas, ctx: &RenderContext) {
+impl Forma {
+    /// Delega en la Strategy del tipo concreto (D5 intacto), pasándole el
+    /// giro para que lo honre según su familia de rasterizado.
+    pub fn render(&self, canvas: &mut Canvas, ctx: &RenderContext, giro: Giro) {
         match self {
-            Objeto::Flecha(a) => a.render(canvas, ctx),
-            Objeto::Elipse(a) => a.render(canvas, ctx),
-            Objeto::Resaltador(a) => a.render(canvas, ctx),
-            Objeto::Linea(a) => a.render(canvas, ctx),
-            Objeto::Lapiz(a) => a.render(canvas, ctx),
-            Objeto::Pixelado(a) => a.render(canvas, ctx),
-            Objeto::Rect(a) => a.render(canvas, ctx),
-            Objeto::Paso(a) => a.render(canvas, ctx),
-            Objeto::Texto(a) => a.render(canvas, ctx),
+            Forma::Flecha(a) => a.render_girado(canvas, ctx, giro),
+            Forma::Elipse(a) => a.render_girado(canvas, ctx, giro),
+            Forma::Resaltador(a) => a.render_girado(canvas, ctx, giro),
+            Forma::Linea(a) => a.render_girado(canvas, ctx, giro),
+            Forma::Lapiz(a) => a.render_girado(canvas, ctx, giro),
+            Forma::Pixelado(a) => a.render_girado(canvas, ctx, giro),
+            Forma::Rect(a) => a.render_girado(canvas, ctx, giro),
+            Forma::Paso(a) => a.render_girado(canvas, ctx, giro),
+            Forma::Texto(a) => a.render_girado(canvas, ctx, giro),
         }
     }
 
-    /// Caja que encierra lo que el objeto pinta, para el hit-test de la
-    /// herramienta de selección. Necesita el `ctx` porque medir el texto
-    /// exige la fuente; sin fuente cargada el texto devuelve un rect vacío
-    /// y por tanto no es seleccionable (la GUI siempre carga la fuente).
-    pub fn bounds(&self, ctx: &RenderContext) -> Rect {
+    /// Caja que encierra lo que la forma pinta SIN girar. Cada tipo la
+    /// expone en su propio archivo con `caja()`: es el mismo punto de
+    /// verdad que usa su `render_girado` para el centro de giro — si
+    /// divergieran, el objeto se desplazaría al rotarlo.
+    ///
+    /// Necesita el `ctx` porque medir el texto exige la fuente; sin fuente
+    /// cargada el texto devuelve un rect vacío y no es seleccionable (la
+    /// GUI siempre carga la fuente).
+    pub fn bounds_sin_girar(&self, ctx: &RenderContext) -> Rect {
         match self {
-            // Contornos: el trazo se reparte a ambos lados del borde, así
-            // que la caja crece medio grosor (lo verifica el test que
-            // compara la caja contra los píxeles realmente pintados).
-            Objeto::Elipse(a) => caja_con_trazo(a.rect, a.style.thickness),
-            Objeto::Rect(a) => caja_con_trazo(a.rect, a.style.thickness),
-            // Rellenos: no se salen de su rect.
-            Objeto::Resaltador(a) => a.rect,
-            Objeto::Pixelado(a) => a.rect,
-            // El trazo sobresale del eje geométrico: margen = medio grosor.
-            Objeto::Linea(a) => {
-                Rect::bounding(&[a.from, a.to], a.style.thickness.max(1) / 2)
-            }
-            Objeto::Flecha(a) => {
-                // Los brazos van a 150° del eje: sobresalen del eje
-                // sin(150°) · largo = largo/2 en perpendicular.
-                let cabeza = (a.head_len() / 2.0).ceil().max(0.0) as u32;
-                Rect::bounding(&[a.from, a.to], a.style.thickness.max(1) / 2 + cabeza)
-            }
-            Objeto::Lapiz(a) => Rect::bounding(&a.points, a.style.thickness.max(1) / 2),
-            Objeto::Paso(a) => {
-                let r = a.radius() as i32;
-                Rect::bounding(&[(a.center.0 - r, a.center.1 - r), (a.center.0 + r, a.center.1 + r)], 0)
-            }
-            Objeto::Texto(a) => match text_ink_box(&a.text, a.style, ctx) {
-                Some((dx, dy, w, h)) => Rect::new(a.pos.0 + dx, a.pos.1 + dy, w, h),
-                None => Rect::new(0, 0, 0, 0),
-            },
+            Forma::Flecha(a) => a.caja(),
+            Forma::Elipse(a) => a.caja(),
+            Forma::Resaltador(a) => a.caja(),
+            Forma::Linea(a) => a.caja(),
+            Forma::Lapiz(a) => a.caja(),
+            Forma::Pixelado(a) => a.caja(),
+            Forma::Rect(a) => a.caja(),
+            Forma::Paso(a) => a.caja(),
+            Forma::Texto(a) => a.caja(ctx),
         }
+    }
+
+    fn translate(&mut self, delta: (i32, i32)) {
+        let mover = |p: &mut (i32, i32)| {
+            p.0 = p.0.saturating_add(delta.0);
+            p.1 = p.1.saturating_add(delta.1);
+        };
+        match self {
+            Forma::Elipse(a) => a.rect = a.rect.translated(delta),
+            Forma::Rect(a) => a.rect = a.rect.translated(delta),
+            Forma::Resaltador(a) => a.rect = a.rect.translated(delta),
+            Forma::Pixelado(a) => a.rect = a.rect.translated(delta),
+            Forma::Linea(a) => {
+                mover(&mut a.from);
+                mover(&mut a.to);
+            }
+            Forma::Flecha(a) => {
+                mover(&mut a.from);
+                mover(&mut a.to);
+            }
+            Forma::Lapiz(a) => a.points.iter_mut().for_each(mover),
+            Forma::Paso(a) => mover(&mut a.center),
+            Forma::Texto(a) => mover(&mut a.pos),
+        }
+    }
+}
+
+/// Un objeto COLOCADO en el documento: una forma más su giro.
+#[derive(Clone)]
+pub struct Objeto {
+    pub forma: Forma,
+    pub giro: Giro,
+}
+
+impl Objeto {
+    pub fn nuevo(forma: Forma) -> Self {
+        Self {
+            forma,
+            giro: Giro::nulo(),
+        }
+    }
+
+    pub fn render(&self, canvas: &mut Canvas, ctx: &RenderContext) {
+        self.forma.render(canvas, ctx, self.giro);
+    }
+
+    /// Caja del objeto TAL Y COMO SE VE: la caja sin girar con sus cuatro
+    /// esquinas rotadas. Con giro nulo es exactamente la de antes.
+    pub fn bounds(&self, ctx: &RenderContext) -> Rect {
+        let base = self.forma.bounds_sin_girar(ctx);
+        if self.giro.es_nulo() || base.is_empty() {
+            return base;
+        }
+        let centro = base.centro();
+        let girada = base.corners().map(|c| self.giro.aplicar(c, centro));
+        Rect::bounding(&girada, 0)
     }
 
     /// Desplaza el objeto `delta` píxeles. Es la operación que necesita
     /// `Command::Move`: aplicar y revertir es el mismo código con el
     /// delta negado, así que mover queda deshacible sin caso especial.
     pub fn translate(&mut self, delta: (i32, i32)) {
-        let mover = |p: &mut (i32, i32)| {
-            p.0 = p.0.saturating_add(delta.0);
-            p.1 = p.1.saturating_add(delta.1);
-        };
-        match self {
-            Objeto::Elipse(a) => a.rect = a.rect.translated(delta),
-            Objeto::Rect(a) => a.rect = a.rect.translated(delta),
-            Objeto::Resaltador(a) => a.rect = a.rect.translated(delta),
-            Objeto::Pixelado(a) => a.rect = a.rect.translated(delta),
-            Objeto::Linea(a) => {
-                mover(&mut a.from);
-                mover(&mut a.to);
-            }
-            Objeto::Flecha(a) => {
-                mover(&mut a.from);
-                mover(&mut a.to);
-            }
-            Objeto::Lapiz(a) => a.points.iter_mut().for_each(mover),
-            Objeto::Paso(a) => mover(&mut a.center),
-            Objeto::Texto(a) => mover(&mut a.pos),
-        }
+        self.forma.translate(delta);
     }
-}
 
-/// Caja de una forma cuyo CONTORNO se estampa con `grosor`: el trazo
-/// sobresale medio grosor del borde geométrico por los cuatro lados.
-fn caja_con_trazo(rect: Rect, grosor: u32) -> Rect {
-    if rect.is_empty() {
-        return rect;
+    /// Suma `delta_rad` al giro. El centro se recalcula de la caja sin
+    /// girar, que no cambia al rotar, así que girar y desgirar es
+    /// exactamente reversible (lo que necesita `Command::Rotate`).
+    pub fn rotar(&mut self, delta_rad: f32) {
+        self.giro = Giro::new(self.giro.rad() + delta_rad);
     }
-    let esquinas = [
-        (rect.x, rect.y),
-        (
-            rect.x + rect.width as i32 - 1,
-            rect.y + rect.height as i32 - 1,
-        ),
-    ];
-    Rect::bounding(&esquinas, grosor.max(1) / 2)
 }
 
 /// Conversiones para que los llamadores construyan sin nombrar la variante:
@@ -136,7 +155,7 @@ macro_rules! desde {
     ($($tipo:ty => $variante:ident),* $(,)?) => {
         $(impl From<$tipo> for Objeto {
             fn from(a: $tipo) -> Self {
-                Objeto::$variante(a)
+                Objeto::nuevo(Forma::$variante(a))
             }
         })*
     };
@@ -252,6 +271,95 @@ mod tests {
                             caja.contains_point((x as i32, y as i32)),
                             "caso {i}: pinta en ({x}, {y}) fuera de la caja {caja:?}"
                         );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn sin_giro_la_caja_es_la_de_la_forma_sin_girar() {
+        let ctx = ctx();
+        for o in todos() {
+            assert_eq!(o.bounds(&ctx), o.forma.bounds_sin_girar(&ctx));
+        }
+    }
+
+    #[test]
+    fn un_cuarto_de_vuelta_intercambia_ancho_y_alto() {
+        let ctx = ctx();
+        let mut o: Objeto = RectAnnotation {
+            rect: Rect::new(10, 10, 40, 10),
+            style: ESTILO,
+        }
+        .into();
+        let antes = o.bounds(&ctx);
+        o.rotar(std::f32::consts::FRAC_PI_2);
+        let despues = o.bounds(&ctx);
+        // ±1 px por el redondeo de las esquinas rotadas.
+        assert!((despues.width as i32 - antes.height as i32).abs() <= 1);
+        assert!((despues.height as i32 - antes.width as i32).abs() <= 1);
+        // El centro se conserva: girar no desplaza.
+        let (ca, cd) = (antes.centro(), despues.centro());
+        assert!((ca.0 - cd.0).abs() <= 1.0 && (ca.1 - cd.1).abs() <= 1.0);
+    }
+
+    #[test]
+    fn girar_y_desgirar_devuelve_la_caja_original() {
+        let ctx = ctx();
+        for mut o in todos() {
+            let original = o.bounds(&ctx);
+            o.rotar(0.9);
+            o.rotar(-0.9);
+            assert_eq!(o.bounds(&ctx), original);
+        }
+    }
+
+    /// El objeto girado no debe desplazarse respecto a su recuadro: lo que
+    /// pinta tiene que seguir cayendo dentro de la caja que devuelve
+    /// `bounds`. Es lo que se rompe si el centro de giro del rasterizado y
+    /// el de la caja divergen.
+    #[test]
+    fn lo_que_pinta_un_objeto_girado_cae_dentro_de_su_caja() {
+        use crate::ports::Frame;
+        let ctx = ctx();
+        let casos: Vec<Objeto> = vec![
+            LineAnnotation { from: (60, 90), to: (140, 110), style: ESTILO }.into(),
+            ArrowAnnotation { from: (60, 90), to: (140, 110), style: ESTILO }.into(),
+            PenAnnotation { points: vec![(70, 70), (120, 100), (90, 130)], style: ESTILO }.into(),
+            RectAnnotation { rect: Rect::new(60, 70, 70, 50), style: ESTILO }.into(),
+            EllipseAnnotation { rect: Rect::new(60, 70, 70, 50), style: ESTILO }.into(),
+            HighlightAnnotation {
+                rect: Rect::new(60, 70, 70, 50),
+                color: Color::rgba(255, 255, 0, 128),
+            }
+            .into(),
+        ];
+        for (i, base) in casos.into_iter().enumerate() {
+            for &rad in &[0.4, 0.9, std::f32::consts::FRAC_PI_4, 2.1] {
+                let mut o = base.clone();
+                o.rotar(rad);
+                let mut frame = Frame::filled(200, 200, [0, 0, 0, 255]);
+                o.render(&mut Canvas::new(&mut frame), &ctx);
+                let caja = o.bounds(&ctx);
+                // Margen de 1 px: el estampado de discos redondea.
+                let holgada = Rect::new(
+                    caja.x - 1,
+                    caja.y - 1,
+                    caja.width + 2,
+                    caja.height + 2,
+                );
+                for y in 0..200u32 {
+                    for x in 0..200u32 {
+                        let pintado = frame
+                            .pixel(x, y)
+                            .is_some_and(|[r, g, b, _]| r > 0 || g > 0 || b > 0);
+                        if pintado {
+                            assert!(
+                                holgada.contains_point((x as i32, y as i32)),
+                                "caso {i} a {rad} rad: pinta en ({x}, {y}) fuera de {caja:?}"
+                            );
+                        }
                     }
                 }
             }

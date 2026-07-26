@@ -3,21 +3,21 @@
 //! antigua ventana de dibujo.
 
 use rustcapture_core::annotate::annotations::TextAnnotation;
-use rustcapture_core::annotate::{Command, Objeto, TextStyle};
+use rustcapture_core::annotate::{Command, Forma, Objeto, TextStyle};
 use rustcapture_core::ports::Rect;
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     CLIP_DEFAULT_PRECIS, CreateFontW, DEFAULT_CHARSET, DEFAULT_PITCH, DEFAULT_QUALITY, DeleteObject,
-    FW_BOLD, FW_NORMAL, HFONT, InvalidateRect, OUT_DEFAULT_PRECIS,
+    FW_BOLD, FW_NORMAL, HFONT, InvalidateRect, OUT_DEFAULT_PRECIS, ScreenToClient,
 };
 use windows::Win32::UI::Input::KeyboardAndMouse::{SetFocus, VK_ESCAPE};
 use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 // EM_SETSEL vive en UI::Controls, no en WindowsAndMessaging.
 use windows::Win32::UI::Controls::EM_SETSEL;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DestroyWindow, ES_AUTOVSCROLL, ES_MULTILINE, GetParent, GetWindowTextW, HMENU,
-    PostMessageW, SendMessageW, SetWindowTextW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_APP, WM_KEYDOWN,
-    WM_SETFONT, WS_BORDER, WS_CHILD, WS_VISIBLE,
+    CreateWindowExW, DestroyWindow, ES_AUTOVSCROLL, ES_MULTILINE, GetParent, GetWindowRect,
+    GetWindowTextW, HMENU, PostMessageW, SendMessageW, SetWindowTextW, WINDOW_EX_STYLE,
+    WINDOW_STYLE, WM_APP, WM_KEYDOWN, WM_SETFONT, WS_BORDER, WS_CHILD, WS_VISIBLE,
 };
 use windows::core::{PCWSTR, w};
 
@@ -60,7 +60,11 @@ pub(super) fn abrir_reedicion(
 ) -> bool {
     // El enum permite preguntar "¿qué eres?": con Box<dyn> haría falta un
     // downcast que el trait no ofrece.
-    let Some(Objeto::Texto(t)) = state.doc.get(index) else {
+    let Some(Objeto {
+        forma: Forma::Texto(t),
+        ..
+    }) = state.doc.get(index)
+    else {
         return false;
     };
     let (pos, texto, estilo) = (t.pos, t.text.clone(), t.style);
@@ -77,6 +81,15 @@ fn crear_caja(
     estilo: TextStyle,
     editando: Option<usize>,
 ) {
+    // INVARIANTE: hay como máximo un EDIT vivo, y siempre es el de
+    // `state.edit`. Si se creara uno sin cerrar el anterior, el viejo
+    // quedaría huérfano en pantalla para siempre — nadie tendría su HWND
+    // para destruirlo.
+    debug_assert!(
+        state.edit.is_none(),
+        "se está creando una caja de texto con otra abierta"
+    );
+    commit_text(hwnd, state);
     let (vx, vy) = math::frame_to_view(
         pos_frame,
         destino,
@@ -181,11 +194,30 @@ unsafe extern "system" fn edit_subclass(
 }
 
 pub(super) fn cerrar_edit(edit: EditBox) {
-    // SAFETY: destruye el EDIT y su fuente, creados por abrir_edit.
+    // SAFETY: destruye el EDIT y su fuente, creados por abrir_edit. Antes
+    // se anota su rect para que el padre repinte ese hueco: con
+    // WS_CLIPCHILDREN el padre nunca pintó ahí mientras el hijo existía, así
+    // que si no se invalida puede quedar el dibujo del EDIT en pantalla.
     unsafe {
+        let mut rc = RECT::default();
+        let tenia_rect = GetWindowRect(edit.hwnd, &mut rc).is_ok();
+        let padre = GetParent(edit.hwnd).unwrap_or_default();
         _ = DestroyWindow(edit.hwnd);
         if !edit.font.is_invalid() {
             _ = DeleteObject(edit.font.into());
+        }
+        if tenia_rect && !padre.is_invalid() {
+            // De pantalla a cliente del padre.
+            let mut esquina = POINT { x: rc.left, y: rc.top };
+            if ScreenToClient(padre, &mut esquina).as_bool() {
+                let zona = RECT {
+                    left: esquina.x,
+                    top: esquina.y,
+                    right: esquina.x + (rc.right - rc.left),
+                    bottom: esquina.y + (rc.bottom - rc.top),
+                };
+                _ = InvalidateRect(Some(padre), Some(&zona), false);
+            }
         }
     }
 }

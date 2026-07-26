@@ -34,24 +34,30 @@ impl RenderContext {
 }
 
 use crate::annotate::canvas::Canvas;
+use crate::annotate::giro::Giro;
 use crate::annotate::style::TextStyle;
+use crate::ports::Rect;
 
-/// Dibuja texto multilínea; la cobertura del glifo modula el alfa del
-/// color. Sin fuente cargada, no hace nada (la GUI siempre la carga).
-pub(crate) fn draw_text(
-    canvas: &mut Canvas,
-    pos: (i32, i32),
+/// Recorre la cobertura de todos los glifos del texto llamando a `emitir`
+/// con `(x, y, cobertura)` en coordenadas RELATIVAS a `pos`.
+///
+/// Es el único sitio que sabe COLOCAR glifos. Lo consumen `draw_text`, la
+/// medida `text_ink_box` y el rasterizado a buffer del texto girado: así no
+/// pueden divergir en el redondeo, que es lo que descuadraría el centrado
+/// del número de un paso o la caja de selección de un texto.
+fn recorrer_glifos(
     text: &str,
     style: TextStyle,
     ctx: &RenderContext,
+    mut emitir: impl FnMut(i32, i32, u8),
 ) {
     let Some(font) = ctx.font(style.bold) else {
         return;
     };
     let line_height = (style.size * 1.2).round() as i32;
     for (n, linea) in text.split('\n').enumerate() {
-        let base_y = pos.1 + n as i32 * line_height;
-        let mut cursor_x = pos.0 as f32;
+        let base_y = n as i32 * line_height;
+        let mut cursor_x = 0.0f32;
         for c in linea.chars() {
             let (metrics, bitmap) = font.rasterize(c, style.size);
             let gx = cursor_x.round() as i32 + metrics.xmin;
@@ -62,23 +68,34 @@ pub(crate) fn draw_text(
                 if *cobertura == 0 {
                     continue;
                 }
-                let px = gx + (i % metrics.width) as i32;
-                let py = gy + (i / metrics.width) as i32;
-                let alfa = (style.color.a as u16 * *cobertura as u16 / 255) as u8;
-                canvas.blend_pixel(
-                    px,
-                    py,
-                    crate::annotate::style::Color::rgba(
-                        style.color.r,
-                        style.color.g,
-                        style.color.b,
-                        alfa,
-                    ),
+                emitir(
+                    gx + (i % metrics.width) as i32,
+                    gy + (i / metrics.width) as i32,
+                    *cobertura,
                 );
             }
             cursor_x += metrics.advance_width;
         }
     }
+}
+
+/// Dibuja texto multilínea; la cobertura del glifo modula el alfa del
+/// color. Sin fuente cargada, no hace nada (la GUI siempre la carga).
+pub(crate) fn draw_text(
+    canvas: &mut Canvas,
+    pos: (i32, i32),
+    text: &str,
+    style: TextStyle,
+    ctx: &RenderContext,
+) {
+    recorrer_glifos(text, style, ctx, |x, y, cobertura| {
+        let alfa = (u16::from(style.color.a) * u16::from(cobertura) / 255) as u8;
+        canvas.blend_pixel(
+            pos.0 + x,
+            pos.1 + y,
+            crate::annotate::style::Color::rgba(style.color.r, style.color.g, style.color.b, alfa),
+        );
+    });
 }
 
 /// Caja de la TINTA del texto, relativa al `pos` que recibe `draw_text`:
@@ -94,34 +111,104 @@ pub(crate) fn text_ink_box(
     style: TextStyle,
     ctx: &RenderContext,
 ) -> Option<(i32, i32, u32, u32)> {
-    let font = ctx.font(style.bold)?;
-    let line_height = (style.size * 1.2).round() as i32;
     let (mut min_x, mut min_y) = (i32::MAX, i32::MAX);
     let (mut max_x, mut max_y) = (i32::MIN, i32::MIN);
-    for (n, linea) in text.split('\n').enumerate() {
-        let base_y = n as i32 * line_height;
-        let mut cursor_x = 0.0f32;
-        for c in linea.chars() {
-            let metrics = font.metrics(c, style.size);
-            if metrics.width > 0 && metrics.height > 0 {
-                let gx = cursor_x.round() as i32 + metrics.xmin;
-                let gy = base_y + style.size.round() as i32 - metrics.height as i32 - metrics.ymin;
-                min_x = min_x.min(gx);
-                min_y = min_y.min(gy);
-                max_x = max_x.max(gx + metrics.width as i32);
-                max_y = max_y.max(gy + metrics.height as i32);
-            }
-            cursor_x += metrics.advance_width;
-        }
-    }
-    (min_x < max_x && min_y < max_y).then(|| {
+    recorrer_glifos(text, style, ctx, |x, y, _| {
+        min_x = min_x.min(x);
+        min_y = min_y.min(y);
+        max_x = max_x.max(x);
+        max_y = max_y.max(y);
+    });
+    (min_x <= max_x && min_y <= max_y).then(|| {
         (
             min_x,
             min_y,
-            (max_x - min_x) as u32,
-            (max_y - min_y) as u32,
+            (max_x - min_x + 1) as u32,
+            (max_y - min_y + 1) as u32,
         )
     })
+}
+
+/// Texto girado por mapeo inverso: los glifos se rasterizan una vez a un
+/// buffer de cobertura SIN girar (fontdue no sabe rotar) y ese buffer se
+/// muestrea con bilineal desde el destino. Rotar hacia delante dejaría
+/// huecos entre píxeles; esta es la única forma con glifos ya rasterizados.
+///
+/// Es la única familia que pierde nitidez al girar, y es inevitable.
+pub(crate) fn draw_text_rotado(
+    canvas: &mut Canvas,
+    pos: (i32, i32),
+    text: &str,
+    style: TextStyle,
+    ctx: &RenderContext,
+    giro: Giro,
+    centro: (f32, f32),
+) {
+    if giro.es_nulo() {
+        return draw_text(canvas, pos, text, style, ctx);
+    }
+    let Some((dx, dy, w, h)) = text_ink_box(text, style, ctx) else {
+        return;
+    };
+    // Cobertura del texto en su propio espacio, con la tinta pegada al (0,0)
+    // del buffer.
+    let (bw, bh) = (w as usize, h as usize);
+    let mut cobertura = vec![0u8; bw * bh];
+    recorrer_glifos(text, style, ctx, |x, y, c| {
+        let (bx, by) = (x - dx, y - dy);
+        if bx >= 0 && by >= 0 && (bx as usize) < bw && (by as usize) < bh {
+            let i = by as usize * bw + bx as usize;
+            cobertura[i] = cobertura[i].max(c);
+        }
+    });
+
+    let origen = (pos.0 + dx, pos.1 + dy);
+    let caja_obj = Rect::new(origen.0, origen.1, w, h);
+    let caja = Rect::bounding(&caja_obj.corners().map(|c| giro.aplicar(c, centro)), 1);
+    for y in caja.y..caja.bottom() as i32 {
+        for x in caja.x..caja.right() as i32 {
+            let (ox, oy) = giro.deshacer((x as f32, y as f32), centro);
+            let a = muestrear_bilineal(
+                &cobertura,
+                (bw, bh),
+                ox - origen.0 as f32,
+                oy - origen.1 as f32,
+            );
+            if a == 0 {
+                continue;
+            }
+            let alfa = (u16::from(style.color.a) * u16::from(a) / 255) as u8;
+            canvas.blend_pixel(
+                x,
+                y,
+                crate::annotate::style::Color::rgba(
+                    style.color.r,
+                    style.color.g,
+                    style.color.b,
+                    alfa,
+                ),
+            );
+        }
+    }
+}
+
+/// Cobertura interpolada bilinealmente; 0 fuera del buffer.
+fn muestrear_bilineal(cob: &[u8], (bw, bh): (usize, usize), fx: f32, fy: f32) -> u8 {
+    if bw == 0 || bh == 0 || fx < -1.0 || fy < -1.0 || fx > bw as f32 || fy > bh as f32 {
+        return 0;
+    }
+    let (x0, y0) = (fx.floor() as i32, fy.floor() as i32);
+    let (tx, ty) = (fx - x0 as f32, fy - y0 as f32);
+    let en = |x: i32, y: i32| -> f32 {
+        if x < 0 || y < 0 || x as usize >= bw || y as usize >= bh {
+            0.0
+        } else {
+            f32::from(cob[y as usize * bw + x as usize])
+        }
+    };
+    let arriba = en(x0, y0) * (1.0 - tx) + en(x0 + 1, y0) * tx;
+    let abajo = en(x0, y0 + 1) * (1.0 - tx) + en(x0 + 1, y0 + 1) * tx;
+    (arriba * (1.0 - ty) + abajo * ty).round().clamp(0.0, 255.0) as u8
 }
 
 #[cfg(test)]

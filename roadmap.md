@@ -50,10 +50,19 @@ Objetivo: capturar y sacar por portapapeles/archivo desde barra, hotkey y CLI. P
 - ✅ Modelo de documento: objetos `Annotation`, Strategy y `Canvas` sobre frame RGBA (D5); la toolbar del editor hace de Factory.
 - ✅ Command pattern con undo/redo (D6); sobrevive al guardado (hornear bajo demanda, D12).
 - 🔵 Herramientas (motor en core): texto, flechas, líneas, formas, resaltado, lápiz, pixelado/desenfoque, pasos numerados y goma hechos e integrados en el editor; leyendas pendientes.
-- ✅ Selección y movimiento de objetos: `Objeto::bounds`/`translate`, `Document::hit_test` y `Command::Move` en el motor (D5+D6), y en el editor la herramienta Selección (clic elige, arrastre mueve, marco punteado con 8 asas, Esc suelta) más la goma y Supr que borran el objeto (f.27).
+- ✅ Selección, movimiento y reedición de objetos (f.52): `Objeto::bounds`/`translate`, `Document::hit_test` y Commands `Move`/`Replace` en el motor (D5+D6), y en el editor la herramienta Selección (clic elige, arrastre mueve, doble clic reedita un texto, marco punteado con 8 asas, Esc suelta) más la goma y Supr que borran el objeto (f.27).
+- ✅ Rotación de objetos (f.53): `Objeto { forma, giro }` con rasterizado girado en las nueve formas y `Command::Rotate`; asa redonda en el recuadro, arrastre circular y salto de 15° con Shift.
 - ⏳ Recorte, redimensionado, nitidez, marca de agua, efectos de borde (f.26, f.28-f.30).
 - ⏳ Formato propio re-editable: PNG base + JSON de objetos en contenedor zip (f.31).
 - ⏳ Resto de salidas: impresora, email, editor externo; WebP, BMP, GIF, TIFF, PDF (f.42-f.45).
+
+## 4c. F3.6 — Manipulación de objetos
+
+Convierte el editor en un editor de verdad: los objetos colocados dejan de ser inmutables.
+
+- ✅ S-D — Pixelado/desenfoque (f.25) y pasos numerados (f.23).
+- ✅ S-E — Motor cerrado en un enum (`Objeto`), selección, movimiento, reedición de texto y goma (f.52, f.27).
+- ✅ S-F — Rotación con asa y snap (f.53).
 
 ## 4b. F3.5 — Rediseño visual V4 (D13)
 

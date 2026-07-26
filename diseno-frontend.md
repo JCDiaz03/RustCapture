@@ -43,7 +43,7 @@ Ventana fullscreen sin bordes sobre el frame congelado (oscurecido ~30 % fuera d
 ### V4 — Editor (f.21-f.31) `(parcial: chrome + anotación in situ implementados)`
 Ventana principal de edición, redimensionable.
 - Toolbar superior: selección, texto, flecha, línea, forma, elipse, lápiz, resaltador, pasos numerados, pixelado, goma `(hechas)`, leyenda `(D)` | recorte, redimensionar `(D)` | deshacer/rehacer `(hechos)`.
-- Objeto seleccionado: marco punteado de 1 px en el acento `#0067C0` con 8 asas de 6 px lógicos (esquinas y puntos medios); clic elige el de más arriba del z-order, arrastre lo mueve, Esc suelta, Supr o la goma lo borran `(hecho)`.
+- Objeto seleccionado: marco punteado de 1 px en el acento `#0067C0` con 8 asas cuadradas de 6 px lógicos (esquinas y puntos medios) y un botón REDONDO de rotación de 24 px con el icono `edit-rotate`, situado fuera del recuadro a la derecha de la esquina superior derecha y a la altura de su borde superior (separación 26 px lógicos al centro); ese botón solo aparece con la herramienta Selección activa, no con la goma. Clic elige el objeto de más arriba del z-order, arrastre lo mueve, arrastrar el botón redondo lo gira (Shift = salto de 15°), doble clic sobre un texto lo reedita, Esc suelta, Supr o la goma lo borran `(hecho)`.
 - Barra de propiedades contextual bajo la toolbar (grosor, color, tamaño de fuente, negrita, modo de censura y bloque/radio) `(hecha, con chips + menú popup)`.
 - Canvas central con ajuste a ventana `(hecho)`; zoom Ctrl+rueda `(diferido)`.
 - Pestañas inferiores: una por captura abierta (miniatura + nombre) `(diferido)`.
@@ -82,7 +82,7 @@ Ventana con lista lateral de secciones: General (idioma, arranque, tema, portabl
 - **Captura extra (3):** temporizador/retardo, repetir última, menú desplegado.
 - **Grabación (6):** grabar (círculo), pausa, detener, micrófono, altavoz, webcam.
 - **Anotación (11):** cursor/selección, texto, flecha, línea, rectángulo/forma, resaltador, pasos numerados, leyenda/caption, pixelado, goma, recorte.
-- **Edición (5):** deshacer, rehacer, redimensionar, marca de agua, efectos de borde.
+- **Edición (6):** deshacer, rehacer, redimensionar, rotar, marca de agua, efectos de borde.
 - **Salidas (6):** copiar, guardar, guardar-como, imprimir, email, editor externo.
 - **Utilidades (6):** cuentagotas, lupa, regla, crosshair, pin, OCR/texto.
 - **Sistema (5):** ajustes, expandir/colapsar barra, asa de arrastre, cerrar, tema claro/oscuro.

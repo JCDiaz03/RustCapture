@@ -4,9 +4,11 @@
 
 use crate::annotate::annotations::Annotation;
 use crate::annotate::canvas::Canvas;
+use crate::annotate::giro::Giro;
 use crate::annotate::shapes;
 use crate::annotate::style::{Color, TextStyle};
-use crate::annotate::text::{RenderContext, draw_text, text_ink_box};
+use crate::annotate::text::{RenderContext, draw_text, draw_text_rotado, text_ink_box};
+use crate::ports::Rect;
 
 #[derive(Clone)]
 pub struct StepAnnotation {
@@ -30,15 +32,56 @@ impl StepAnnotation {
     }
 }
 
+impl StepAnnotation {
+    pub(crate) fn caja(&self) -> Rect {
+        let r = self.radius() as i32;
+        Rect::bounding(
+            &[
+                (self.center.0 - r, self.center.1 - r),
+                (self.center.0 + r, self.center.1 + r),
+            ],
+            0,
+        )
+    }
+
+    /// El disco es invariante al giro (es redondo) y su centro coincide con
+    /// el centro de giro, así que solo el NÚMERO rota.
+    pub(crate) fn render_girado(&self, canvas: &mut Canvas, ctx: &RenderContext, giro: Giro) {
+        if giro.es_nulo() {
+            return self.render(canvas, ctx);
+        }
+        shapes::fill_disc_aa(canvas, self.center, self.radius(), self.color);
+        let (style, etiqueta) = self.estilo_numero();
+        if let Some((dx, dy, w, h)) = text_ink_box(&etiqueta, style, ctx) {
+            let pos = (
+                self.center.0 - dx - w as i32 / 2,
+                self.center.1 - dy - h as i32 / 2,
+            );
+            // El número gira alrededor del centro del disco, que es también
+            // el centro de giro del objeto.
+            let centro = (self.center.0 as f32, self.center.1 as f32);
+            draw_text_rotado(canvas, pos, &etiqueta, style, ctx, giro, centro);
+        }
+    }
+
+    /// Estilo y etiqueta del número: un solo sitio, lo comparten el render
+    /// normal y el girado.
+    fn estilo_numero(&self) -> (TextStyle, String) {
+        (
+            TextStyle {
+                color: self.color.contraste(),
+                size: self.font_size,
+                bold: true,
+            },
+            self.number.to_string(),
+        )
+    }
+}
+
 impl Annotation for StepAnnotation {
     fn render(&self, canvas: &mut Canvas, ctx: &RenderContext) {
         shapes::fill_disc_aa(canvas, self.center, self.radius(), self.color);
-        let style = TextStyle {
-            color: self.color.contraste(),
-            size: self.font_size,
-            bold: true,
-        };
-        let etiqueta = self.number.to_string();
+        let (style, etiqueta) = self.estilo_numero();
         // Se centra la caja de TINTA, no la de línea: ver `text_ink_box`.
         if let Some((dx, dy, w, h)) = text_ink_box(&etiqueta, style, ctx) {
             let pos = (

@@ -55,6 +55,23 @@ impl Rect {
             && (p.1 as i64) < self.bottom()
     }
 
+    /// Las cuatro esquinas en orden (sup-izq, sup-der, inf-der, inf-izq),
+    /// con bordes INCLUSIVOS: la esquina lejana es el último píxel, no el
+    /// borde exclusivo, porque es lo que se rota para obtener la caja.
+    pub fn corners(&self) -> [(i32, i32); 4] {
+        let x1 = self.x + self.width.max(1) as i32 - 1;
+        let y1 = self.y + self.height.max(1) as i32 - 1;
+        [(self.x, self.y), (x1, self.y), (x1, y1), (self.x, y1)]
+    }
+
+    /// Centro geométrico en coma flotante (el centro de giro).
+    pub fn centro(&self) -> (f32, f32) {
+        (
+            self.x as f32 + (self.width.max(1) as f32 - 1.0) / 2.0,
+            self.y as f32 + (self.height.max(1) as f32 - 1.0) / 2.0,
+        )
+    }
+
     /// Copia desplazada por `delta`, saturando en los extremos de `i32`.
     pub fn translated(&self, delta: (i32, i32)) -> Rect {
         Rect::new(
@@ -155,6 +172,21 @@ mod tests {
         assert!(!n.contains_point((-101, -50)));
         // Vacío: nada dentro.
         assert!(!Rect::new(0, 0, 0, 5).contains_point((0, 0)));
+    }
+
+    #[test]
+    fn corners_da_las_cuatro_esquinas_inclusivas_en_orden() {
+        // Bordes inclusivos: la esquina lejana es el último píxel.
+        assert_eq!(
+            Rect::new(10, 20, 5, 3).corners(),
+            [(10, 20), (14, 20), (14, 22), (10, 22)]
+        );
+    }
+
+    #[test]
+    fn centro_es_el_punto_medio_en_coma_flotante() {
+        assert_eq!(Rect::new(10, 20, 5, 3).centro(), (12.0, 21.0));
+        assert_eq!(Rect::new(0, 0, 4, 4).centro(), (1.5, 1.5));
     }
 
     #[test]

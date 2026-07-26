@@ -122,6 +122,28 @@ pub(crate) fn draw_rect_outline(canvas: &mut Canvas, rect: Rect, style: &Style) 
 
 /// Contorno por muestreo paramétrico (pasos ∝ perímetro del rect).
 pub(crate) fn draw_ellipse_outline(canvas: &mut Canvas, rect: Rect, style: &Style) {
+    muestrear_elipse(rect, |x, y| {
+        stamp_disc(canvas, x, y, style.thickness, style.color)
+    });
+}
+
+/// La misma elipse con cada muestra rotada antes de estampar. Comparte el
+/// muestreo con `draw_ellipse_outline` para que no puedan divergir.
+pub(crate) fn draw_ellipse_outline_girada(
+    canvas: &mut Canvas,
+    rect: Rect,
+    style: &Style,
+    giro: crate::annotate::giro::Giro,
+) {
+    let centro = rect.centro();
+    muestrear_elipse(rect, |x, y| {
+        let (gx, gy) = giro.aplicar((x, y), centro);
+        stamp_disc(canvas, gx, gy, style.thickness, style.color)
+    });
+}
+
+/// Recorrido paramétrico del contorno: llama a `f` con cada muestra.
+fn muestrear_elipse(rect: Rect, mut f: impl FnMut(i32, i32)) {
     if rect.is_empty() {
         return;
     }
@@ -132,9 +154,47 @@ pub(crate) fn draw_ellipse_outline(canvas: &mut Canvas, rect: Rect, style: &Styl
     let pasos = (4.0 * (rect.width + rect.height) as f64).max(16.0) as u32;
     for i in 0..pasos {
         let t = i as f64 / pasos as f64 * std::f64::consts::TAU;
-        let x = (cx + rx * t.cos()).round() as i32;
-        let y = (cy + ry * t.sin()).round() as i32;
-        stamp_disc(canvas, x, y, style.thickness, style.color);
+        f(
+            (cx + rx * t.cos()).round() as i32,
+            (cy + ry * t.sin()).round() as i32,
+        );
+    }
+}
+
+/// Relleno de un cuadrilátero CONVEXO por barrido de filas: para cada y se
+/// calculan las intersecciones con los cuatro lados y se rellena entre la
+/// menor y la mayor. Lo usan las formas de caja al estar giradas, donde ya
+/// no se puede recorrer el rect por filas.
+pub(crate) fn fill_quad_blend(canvas: &mut Canvas, quad: [(i32, i32); 4], color: Color) {
+    let y_min = quad.iter().map(|p| p.1).min().unwrap_or(0);
+    let y_max = quad.iter().map(|p| p.1).max().unwrap_or(0);
+    for y in y_min..=y_max {
+        let mut x_min = i32::MAX;
+        let mut x_max = i32::MIN;
+        for i in 0..4 {
+            let (a, b) = (quad[i], quad[(i + 1) % 4]);
+            if a.1 == b.1 {
+                // Lado horizontal: aporta sus dos extremos en su propia fila.
+                if a.1 == y {
+                    x_min = x_min.min(a.0.min(b.0));
+                    x_max = x_max.max(a.0.max(b.0));
+                }
+                continue;
+            }
+            let (alto, bajo) = if a.1 < b.1 { (a, b) } else { (b, a) };
+            if y < alto.1 || y > bajo.1 {
+                continue;
+            }
+            let t = (y - alto.1) as f32 / (bajo.1 - alto.1) as f32;
+            let x = (alto.0 as f32 + t * (bajo.0 - alto.0) as f32).round() as i32;
+            x_min = x_min.min(x);
+            x_max = x_max.max(x);
+        }
+        if x_min <= x_max {
+            for x in x_min..=x_max {
+                canvas.blend_pixel(x, y, color);
+            }
+        }
     }
 }
 
@@ -244,6 +304,39 @@ mod tests {
         let [r, g, b, _] = frame.pixel(6, 6).unwrap();
         assert!((127..=129).contains(&r) && (127..=129).contains(&g) && b == 0);
         assert_eq!(frame.pixel(4, 4), Some(NEGRO));
+    }
+
+    #[test]
+    fn fill_quad_rellena_un_rombo_y_deja_las_esquinas() {
+        let mut frame = Frame::filled(20, 20, NEGRO);
+        // Rombo inscrito en 4..16.
+        fill_quad_blend(
+            &mut Canvas::new(&mut frame),
+            [(10, 4), (16, 10), (10, 16), (4, 10)],
+            ROJO,
+        );
+        assert!(es_rojo(&frame, 10, 10) && es_rojo(&frame, 10, 5));
+        assert!(!es_rojo(&frame, 5, 5), "la esquina queda fuera del rombo");
+        // Los cuatro vértices están dentro.
+        for (x, y) in [(10, 4), (16, 10), (10, 16), (4, 10)] {
+            assert!(es_rojo(&frame, x, y), "falta el vértice ({x},{y})");
+        }
+    }
+
+    #[test]
+    fn fill_quad_de_un_rect_sin_girar_es_el_rect_completo() {
+        let mut frame = Frame::filled(20, 20, NEGRO);
+        fill_quad_blend(
+            &mut Canvas::new(&mut frame),
+            [(4, 4), (11, 4), (11, 9), (4, 9)],
+            ROJO,
+        );
+        for y in 4..=9u32 {
+            for x in 4..=11u32 {
+                assert!(es_rojo(&frame, x, y), "hueco en ({x},{y})");
+            }
+        }
+        assert!(!es_rojo(&frame, 12, 9) && !es_rojo(&frame, 4, 10));
     }
 
     #[test]

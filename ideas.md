@@ -57,6 +57,7 @@ Desarrollo: IA-first (Opus 4.8 / Fable 5).
 30. Efectos de borde (sombra, borde rasgado).
 31. Formato propio sin pérdida que conserva los objetos de anotación editables junto a la imagen (equivalente al `.fsc` de FastStone).
 52. Selección y reedición de objetos ya colocados: la herramienta de selección elige el objeto de más arriba del z-order, el arrastre lo reposiciona y el doble clic sobre un texto reabre su caja para cambiarlo. Todo son Commands deshacibles como cualquier otra edición.
+53. Rotación de objetos ya colocados: asa redonda sobre el recuadro de selección, arrastre circular alrededor del centro del objeto y salto de 15° manteniendo Shift.
 
 ### Grabación de vídeo
 

@@ -2,9 +2,11 @@
 
 use crate::annotate::annotations::Annotation;
 use crate::annotate::canvas::Canvas;
+use crate::annotate::giro::Giro;
 use crate::annotate::shapes;
 use crate::annotate::style::Style;
 use crate::annotate::text::RenderContext;
+use crate::ports::Rect;
 
 #[derive(Clone)]
 pub struct ArrowAnnotation {
@@ -31,6 +33,33 @@ impl ArrowAnnotation {
         (f64::from(self.style.thickness) * 4.0)
             .max(10.0)
             .min(self.largo_eje())
+    }
+}
+
+impl ArrowAnnotation {
+    pub(crate) fn caja(&self) -> Rect {
+        // Los brazos van a 150° del eje: sobresalen del eje
+        // sin(150°) · largo = largo/2 en perpendicular.
+        let cabeza = (self.head_len() / 2.0).ceil().max(0.0) as u32;
+        Rect::bounding(
+            &[self.from, self.to],
+            self.style.thickness.max(1) / 2 + cabeza,
+        )
+    }
+
+    /// Familia «puntos»: rotando los dos extremos la cabeza se recalcula
+    /// sola (su ángulo se deriva del eje).
+    pub(crate) fn render_girado(&self, canvas: &mut Canvas, ctx: &RenderContext, giro: Giro) {
+        if giro.es_nulo() {
+            return self.render(canvas, ctx);
+        }
+        let centro = self.caja().centro();
+        ArrowAnnotation {
+            from: giro.aplicar(self.from, centro),
+            to: giro.aplicar(self.to, centro),
+            style: self.style,
+        }
+        .render(canvas, ctx);
     }
 }
 

@@ -21,15 +21,16 @@ use rustcapture_core::output::{ImageFormat, encode};
 use rustcapture_core::ports::{Frame, OutputError, OutputSink, Rect};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, DrawTextW, EndPaint, HALFTONE, HBRUSH,
-    HDC, InvalidateRect, PAINTSTRUCT, SRCCOPY, SelectObject, SetBkMode, SetStretchBltMode,
-    SetTextColor, StretchBlt, TRANSPARENT,
+    BeginPaint, CreatePen, CreateSolidBrush, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, DeleteObject,
+    DrawTextW, Ellipse, EndPaint, HALFTONE, HBRUSH, HDC, InvalidateRect, PAINTSTRUCT, PS_SOLID,
+    SRCCOPY, SelectObject, SetBkMode, SetStretchBltMode, SetTextColor, StretchBlt, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::DRAWITEMSTRUCT;
 use windows::Win32::UI::Controls::Dialogs::{GetSaveFileNameW, OFN_OVERWRITEPROMPT, OPENFILENAMEW};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     EnableWindow, GetKeyState, ReleaseCapture, SetCapture, VK_CONTROL, VK_DELETE, VK_ESCAPE,
+    VK_SHIFT,
 };
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{PCWSTR, w};
@@ -40,7 +41,7 @@ use crate::ui::botonera;
 use crate::ui::{boton, fuentes, lienzo, theme, ventana};
 use crate::util::{punto, wide};
 
-use estado::{DragState, EditorState, MoverDrag};
+use estado::{DragState, EditorState, GirarDrag, MoverDrag};
 use texto::{ID_EDIT_TEXT, WM_APP_CANCEL_TEXT};
 
 /// Mensaje al wndproc de la barra: wparam = `Box<Frame>` crudo, el
@@ -222,6 +223,7 @@ fn cambiar_herramienta(hwnd: HWND, state: &mut EditorState, nueva: math::Herrami
         if !math::opera_sobre_objetos(nueva) {
             state.seleccionado = None;
             state.mover = None;
+            state.girar = None;
         }
         marcar_herramienta(hwnd, Some(previa), nueva);
         // La property bar cambia con la herramienta.
@@ -359,6 +361,98 @@ fn borrar_objeto(hwnd: HWND, state: &mut EditorState, index: usize) {
     }
 }
 
+/// Arranca el arrastre de rotación si el clic (en coordenadas de CLIENTE)
+/// cae sobre el asa del objeto seleccionado. Devuelve true si lo hizo.
+fn empezar_giro(
+    hwnd: HWND,
+    state: &mut EditorState,
+    p: (i32, i32),
+    destino: Rect,
+) -> bool {
+    let Some(index) = state.seleccionado else {
+        return false;
+    };
+    let Some(objeto) = state.doc.get(index) else {
+        return false;
+    };
+    let caja = objeto.bounds(&state.ctx);
+    if caja.is_empty() {
+        return false;
+    }
+    let escala = Escala::from_hwnd(hwnd);
+    let vista = caja_en_vista(caja, destino, &state.committed);
+    let (asa, _) = asa_rotacion_y_talla(vista, escala);
+    // Zona clicable algo más generosa que el dibujo, para no exigir
+    // precisión de píxel.
+    let holgura = escala.px(3);
+    let zona = Rect::new(
+        asa.x - holgura,
+        asa.y - holgura,
+        asa.width + 2 * holgura as u32,
+        asa.height + 2 * holgura as u32,
+    );
+    if !zona.contains_point(p) {
+        return false;
+    }
+    // El centro de giro es el de la caja, en píxeles del frame.
+    let centro = (
+        caja.x + caja.width as i32 / 2,
+        caja.y + caja.height as i32 / 2,
+    );
+    let Some(pf) = math::view_to_frame(p, destino, (state.committed.width, state.committed.height))
+    else {
+        return false;
+    };
+    let inicial = math::angulo_hacia(centro, pf);
+    state.girar = Some(GirarDrag {
+        index,
+        centro,
+        inicial,
+        actual: inicial,
+        snap: false,
+    });
+    // SAFETY: captura del ratón en la propia ventana.
+    unsafe { SetCapture(hwnd) };
+    true
+}
+
+/// Caja del objeto (píxeles del frame) → rect en coordenadas de cliente.
+fn caja_en_vista(caja: Rect, destino: Rect, frame: &Frame) -> Rect {
+    let tam = (frame.width, frame.height);
+    let (x0, y0) = math::frame_to_view((caja.x, caja.y), destino, tam);
+    let (x1, y1) = math::frame_to_view(
+        (caja.right() as i32, caja.bottom() as i32),
+        destino,
+        tam,
+    );
+    Rect::new(x0, y0, (x1 - x0).max(1) as u32, (y1 - y0).max(1) as u32)
+}
+
+/// Cierra el arrastre del asa de rotación como un `Command::Rotate`.
+fn soltar_giro(hwnd: HWND, state: &mut EditorState) {
+    let Some(mut girar) = state.girar.take() else {
+        return;
+    };
+    // SAFETY: se liberó la captura que tomó el WM_LBUTTONDOWN.
+    unsafe {
+        _ = ReleaseCapture();
+        // El snap se decide al soltar: así se puede pulsar o soltar Shift a
+        // mitad del arrastre y vale lo último.
+        girar.snap = GetKeyState(VK_SHIFT.0 as i32) < 0;
+    }
+    // Un giro nulo lo rechaza el propio Command: no gasta un undo.
+    if state.history.apply(
+        &mut state.doc,
+        rustcapture_core::annotate::Command::rotate_by(girar.index, girar.delta()),
+    ) {
+        state.pasos.aplicado(false);
+        state.refresh_committed();
+        state.dirty = true;
+    }
+    // SAFETY: invalidación de la propia ventana.
+    unsafe { _ = InvalidateRect(Some(hwnd), None, false) };
+}
+
 /// Cierra el arrastre de un objeto convirtiéndolo en un `Command::Move`
 /// (un solo comando por arrastre, no uno por `WM_MOUSEMOVE`).
 fn soltar_movimiento(hwnd: HWND, state: &mut EditorState) {
@@ -481,6 +575,13 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
             WM_LBUTTONDOWN => {
                 if let Some(state) = state_mut(hwnd) {
                     let p = punto(lparam);
+                    // Cualquier clic confirma la caja de texto abierta, sea
+                    // sobre otro objeto, en vacío o en la barra de
+                    // propiedades. No basta con EN_KILLFOCUS: pulsar en el
+                    // cliente del padre NO le quita el foco al EDIT hijo, así
+                    // que ese aviso no llega y la caja se quedaba abierta
+                    // mientras se manipulaba otro objeto.
+                    texto::commit_text(hwnd, state);
                     if props::on_click(hwnd, state, p) {
                         return LRESULT(0);
                     }
@@ -490,14 +591,19 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                         // Texto y Pasos se colocan con un clic; el resto
                         // arranca un arrastre con preview en vivo.
                         match state.herramienta {
+                            // La caja anterior ya se confirmó arriba.
                             math::Herramienta::Texto => {
-                                texto::commit_text(hwnd, state);
-                                if let Some(state) = state_mut(hwnd) {
-                                    texto::abrir_edit(hwnd, state, pf, destino);
-                                }
+                                texto::abrir_edit(hwnd, state, pf, destino)
                             }
                             math::Herramienta::Pasos => colocar_paso(hwnd, state, pf),
                             math::Herramienta::Seleccion => {
+                                // El asa de rotación gana al hit-test: está
+                                // FUERA del objeto, así que si no se
+                                // comprobara antes, ese clic caería en vacío
+                                // y deseleccionaría.
+                                if empezar_giro(hwnd, state, p, destino) {
+                                    return LRESULT(0);
+                                }
                                 // Clic en un objeto lo elige y arma el
                                 // arrastre; en vacío, deselecciona.
                                 let indice = state.doc.hit_test(pf, &state.ctx);
@@ -557,6 +663,17 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 if let Some(state) = state_mut(hwnd) {
                     let destino = dest_rect(hwnd, state);
                     let tam = (state.committed.width, state.committed.height);
+                    // Arrastre del asa: el ángulo sigue al puntero.
+                    if state.girar.is_some()
+                        && let Some(pf) = math::view_to_frame(punto(lparam), destino, tam)
+                        && let Some(girar) = state.girar.as_mut()
+                    {
+                        girar.actual = math::angulo_hacia(girar.centro, pf);
+                        girar.snap = GetKeyState(VK_SHIFT.0 as i32) < 0;
+                        let zona = zona_canvas(destino);
+                        _ = InvalidateRect(Some(hwnd), Some(&zona), false);
+                        return LRESULT(0);
+                    }
                     // Arrastre de un objeto: solo mueve el preview.
                     if state.mover.is_some()
                         && let Some(pf) = math::view_to_frame(punto(lparam), destino, tam)
@@ -583,6 +700,12 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 LRESULT(0)
             }
             WM_LBUTTONUP => {
+                if let Some(state) = state_mut(hwnd)
+                    && state.girar.is_some()
+                {
+                    soltar_giro(hwnd, state);
+                    return LRESULT(0);
+                }
                 if let Some(state) = state_mut(hwnd)
                     && state.mover.is_some()
                 {
@@ -725,28 +848,25 @@ fn pintar_seleccion(dc: HDC, state: &EditorState, destino: Rect, escala: Escala)
     if let Some(mover) = state.mover.as_ref().filter(|m| m.index == index) {
         caja = caja.translated(mover.delta());
     }
-    let tam = (state.committed.width, state.committed.height);
-    // Esquinas del objeto → vista. La inferior-derecha usa el borde
-    // exclusivo para que el marco encierre el último píxel escalado.
-    let (vx0, vy0) = math::frame_to_view((caja.x, caja.y), destino, tam);
-    let (vx1, vy1) = math::frame_to_view(
-        (caja.right() as i32, caja.bottom() as i32),
-        destino,
-        tam,
-    );
-    let vista = Rect::new(
-        vx0,
-        vy0,
-        (vx1 - vx0).max(1) as u32,
-        (vy1 - vy0).max(1) as u32,
-    );
+    // Girando, el recuadro sigue al objeto: se usa la caja del objeto ya
+    // girado, así el marco no se queda quieto mientras el objeto rota.
+    if let Some(girar) = state.girar.as_ref().filter(|g| g.index == index) {
+        let mut previsto = objeto.clone();
+        previsto.rotar(girar.delta());
+        let girada = previsto.bounds(&state.ctx);
+        if !girada.is_empty() {
+            caja = girada;
+        }
+    }
+    let vista = caja_en_vista(caja, destino, &state.committed);
     let paleta = theme::actual().paleta();
     let grosor = escala.px(1).max(1);
     let guion = escala.px(4).max(2);
+    let lado_asa = escala.px(math::ASA_LOGICA);
     // SAFETY: DC del back buffer vivo; brochas efímeras de `lienzo`.
     unsafe {
         marco_punteado(dc, vista, grosor, guion, paleta.acento);
-        for asa in math::asas(vista, escala.px(math::ASA_LOGICA)) {
+        for asa in math::asas(vista, lado_asa) {
             let rc = RECT {
                 left: asa.x,
                 top: asa.y,
@@ -756,6 +876,66 @@ fn pintar_seleccion(dc: HDC, state: &EditorState, destino: Rect, escala: Escala)
             lienzo::rellenar(dc, &rc, paleta.acento);
             lienzo::marco(dc, &rc, paleta.superficie);
         }
+        // Asa de rotación: botón redondo con el icono de girar, junto a la
+        // esquina superior derecha. Solo con el selector activo — con la
+        // goma la selección sigue viva pero girar no viene al caso.
+        if state.herramienta == math::Herramienta::Seleccion {
+            let (rot, talla) = asa_rotacion_y_talla(vista, escala);
+            circulo_relleno(dc, rot, paleta.acento, paleta.superficie);
+            // Icono centrado en el botón, tintado con el color de superficie
+            // para que contraste con el relleno de acento.
+            let (cx, cy) = (
+                rot.x + rot.width as i32 / 2,
+                rot.y + rot.height as i32 / 2,
+            );
+            _ = crate::ui::iconos::pintar(
+                dc,
+                crate::ui::iconos::Icono::EditRotate,
+                talla,
+                cx - talla as i32 / 2,
+                cy - talla as i32 / 2,
+                paleta.superficie,
+                crate::ui::iconos::OPACO,
+            );
+        }
+    }
+}
+
+/// Caja del botón de rotación y talla del icono que lleva dentro. Un solo
+/// sitio: lo consumen el pintado y el hit-test del clic, que tienen que
+/// coincidir exactamente o el asa se vería donde no se puede pulsar.
+fn asa_rotacion_y_talla(vista: Rect, escala: Escala) -> (Rect, u32) {
+    let talla = crate::ui::iconos::talla_para_dpi(escala.dpi());
+    let diametro = talla as i32 + 2 * escala.px(math::ASA_ROT_MARGEN);
+    let asa = math::asa_rotacion(vista, diametro, escala.px(math::SEPARACION_LOGICA));
+    (asa, talla)
+}
+
+/// Círculo relleno con borde, dibujado con `Ellipse` de GDI (el asa de
+/// rotación; las de redimensionado son cuadradas a propósito).
+unsafe fn circulo_relleno(
+    dc: HDC,
+    caja: Rect,
+    relleno: windows::Win32::Foundation::COLORREF,
+    borde: windows::Win32::Foundation::COLORREF,
+) {
+    // SAFETY: brochas y lápiz efímeros, seleccionados y restaurados aquí.
+    unsafe {
+        let brocha = CreateSolidBrush(relleno);
+        let lapiz = CreatePen(PS_SOLID, 1, borde);
+        let brocha_previa = SelectObject(dc, brocha.into());
+        let lapiz_previo = SelectObject(dc, lapiz.into());
+        _ = Ellipse(
+            dc,
+            caja.x,
+            caja.y,
+            caja.right() as i32,
+            caja.bottom() as i32,
+        );
+        SelectObject(dc, brocha_previa);
+        SelectObject(dc, lapiz_previo);
+        _ = DeleteObject(brocha.into());
+        _ = DeleteObject(lapiz.into());
     }
 }
 
@@ -796,6 +976,7 @@ unsafe fn marco_punteado(
         y += paso;
     }
 }
+
 
 /// Compone todo el cliente (toolbar, property bar, canvas anotable y
 /// status bar) en un back buffer y lo vuelca de un BitBlt.
@@ -880,6 +1061,16 @@ fn pintar(hwnd: HWND, hdc: HDC, state: &mut EditorState) -> windows::core::Resul
                 }
                 crate::gdi::copy_frame_to_dib(&state.preview, &mut state.preview_dib);
                 &state.preview_dib
+            } else if let Some(girar) = state.girar.as_ref().filter(|g| g.delta() != 0.0) {
+                // Girando: mismo coste que mover (un re-horneado por
+                // mousemove), asumido en el plan.
+                let (index, delta) = (girar.index, girar.delta());
+                state.preview.pixels.copy_from_slice(&state.base.pixels);
+                state
+                    .doc
+                    .render_onto_rotated(&mut state.preview, &state.ctx, index, delta);
+                crate::gdi::copy_frame_to_dib(&state.preview, &mut state.preview_dib);
+                &state.preview_dib
             } else if let Some(mover) = state.mover.as_ref().filter(|m| m.delta() != (0, 0)) {
                 // Moviendo: se re-hornea el documento entero con ese objeto
                 // desplazado. Es lo más caro del editor (un re-horneado por
@@ -961,4 +1152,162 @@ fn pintar(hwnd: HWND, hdc: HDC, state: &mut EditorState) -> windows::core::Resul
         back.volcar(hdc, ancho, alto);
     }
     Ok(())
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gdi::raii::{Dib, MemDc, ScreenDc, Selected};
+    use windows::Win32::Foundation::COLORREF;
+    use windows::Win32::Graphics::Gdi::GdiFlush;
+
+    /// Pinta con `f` sobre un DIB de 40×40 y devuelve sus píxeles BGRA.
+    fn pintar_en_dib(f: impl FnOnce(HDC)) -> Vec<u8> {
+        let screen = ScreenDc::get().expect("DC de pantalla");
+        let mem = MemDc::compatible_with(&screen).expect("DC de memoria");
+        let mut dib = Dib::new_32bpp(&mem, 40, 40).expect("DIB");
+        dib.bits_mut().fill(0); // negro
+        let sel = Selected::bitmap(&mem, &dib).expect("seleccionar DIB");
+        f(mem.0);
+        // SAFETY: GDI debe terminar de escribir antes de leer los bits.
+        unsafe { _ = GdiFlush() };
+        drop(sel);
+        dib.bits().to_vec()
+    }
+
+    fn pintado(bits: &[u8], x: usize, y: usize) -> bool {
+        let i = (y * 40 + x) * 4;
+        bits[i] != 0 || bits[i + 1] != 0 || bits[i + 2] != 0
+    }
+
+    /// El asa de rotación se dibuja con `Ellipse`, que es la única primitiva
+    /// GDI del editor que no pasa por `ui::lienzo`. Este test confirma que
+    /// de verdad pinta píxeles (y no falla en silencio).
+    #[test]
+    fn el_circulo_del_asa_pinta_pixeles() {
+        let rojo = COLORREF(0x0000FF);
+        let bits = pintar_en_dib(|dc| {
+            // SAFETY: DC de memoria vivo con un DIB seleccionado.
+            unsafe { circulo_relleno(dc, Rect::new(10, 10, 12, 12), rojo, rojo) };
+        });
+        // Centro del círculo relleno.
+        assert!(pintado(&bits, 16, 16), "el círculo no pintó su centro");
+        // Borde superior e izquierdo del círculo.
+        assert!(pintado(&bits, 16, 10) || pintado(&bits, 16, 11), "borde arriba");
+        assert!(pintado(&bits, 10, 16) || pintado(&bits, 11, 16), "borde izq.");
+        // Fuera del círculo, intacto.
+        assert!(!pintado(&bits, 2, 2), "pintó fuera de su caja");
+        assert!(!pintado(&bits, 30, 30), "pintó fuera de su caja");
+    }
+
+    /// Pinta el chrome de selección REAL sobre un DIB y devuelve sus bits.
+    /// Es la única forma de comprobar sin ojos que el asa de rotación llega
+    /// a dibujarse: `circulo_relleno` puede funcionar aislado y aun así no
+    /// pintarse nada si el resto de `pintar_seleccion` no llega ahí.
+    fn pintar_chrome(lado: u32) -> (Vec<u8>, Rect, usize) {
+        let screen = ScreenDc::get().expect("DC de pantalla");
+        let mem = MemDc::compatible_with(&screen).expect("DC de memoria");
+        let mut dib = Dib::new_32bpp(&mem, lado, lado).expect("DIB");
+        dib.bits_mut().fill(0);
+        let sel = Selected::bitmap(&mem, &dib).expect("seleccionar DIB");
+
+        // Estado con un rectángulo colocado y seleccionado.
+        let base = Frame::filled(lado, lado, [0, 0, 0, 255]);
+        let mut state = EditorState::new(base).expect("estado");
+        state.herramienta = math::Herramienta::Seleccion;
+        let objeto: rustcapture_core::annotate::Objeto =
+            rustcapture_core::annotate::annotations::RectAnnotation {
+                rect: Rect::new(60, 90, 80, 60),
+                style: rustcapture_core::annotate::Style {
+                    color: rustcapture_core::annotate::Color::rgb(255, 0, 0),
+                    thickness: 2,
+                },
+            }
+            .into();
+        assert!(state.history.apply(
+            &mut state.doc,
+            rustcapture_core::annotate::Command::add(objeto)
+        ));
+        state.seleccionado = Some(0);
+        let caja = state.doc.get(0).unwrap().bounds(&state.ctx);
+
+        // Imagen mapeada 1:1 en el cliente: vista == píxeles del frame.
+        let destino = Rect::new(0, 0, lado, lado);
+        pintar_seleccion(mem.0, &state, destino, Escala::nueva(96));
+        // SAFETY: GDI debe terminar antes de leer los bits.
+        unsafe { _ = GdiFlush() };
+        drop(sel);
+        (dib.bits().to_vec(), caja, lado as usize)
+    }
+
+    #[test]
+    fn el_chrome_de_seleccion_pinta_el_asa_de_rotacion() {
+        let (bits, caja, lado) = pintar_chrome(240);
+        let hay = |x: i32, y: i32| -> bool {
+            if x < 0 || y < 0 || x as usize >= lado || y as usize >= lado {
+                return false;
+            }
+            let i = (y as usize * lado + x as usize) * 4;
+            bits[i] != 0 || bits[i + 1] != 0 || bits[i + 2] != 0
+        };
+        // El recuadro se pinta (esto ya funcionaba).
+        assert!(
+            (caja.x - 2..caja.x + 8).any(|x| hay(x, caja.y)),
+            "no se pintó el marco"
+        );
+        // Y el asa de rotación, FUERA de la caja, también.
+        let vista = Rect::new(caja.x, caja.y, caja.width, caja.height);
+        let (asa, _) = asa_rotacion_y_talla(vista, Escala::nueva(96));
+        let pixeles_asa = (asa.x..asa.right() as i32)
+            .flat_map(|x| (asa.y..asa.bottom() as i32).map(move |y| (x, y)))
+            .filter(|&(x, y)| hay(x, y))
+            .count();
+        assert!(
+            pixeles_asa > 20,
+            "el asa de rotación solo pintó {pixeles_asa} píxeles en {asa:?}"
+        );
+    }
+
+    /// El asa de rotación tiene que quedar POR ENCIMA del recuadro y con el
+    /// icono dentro. Si el brazo fuese menor que el radio, el botón pisaría
+    /// la caja; si el icono no cupiera, se saldría del círculo.
+    #[test]
+    fn el_asa_de_rotacion_no_pisa_el_recuadro_y_cabe_el_icono() {
+        for dpi in [96u32, 120, 144, 192] {
+            let escala = Escala::nueva(dpi);
+            let vista = Rect::new(100, 200, 80, 60);
+            let (asa, talla) = asa_rotacion_y_talla(vista, escala);
+            assert!(
+                asa.x >= vista.right() as i32,
+                "dpi {dpi}: el asa pisa el recuadro"
+            );
+            assert!(
+                talla as i32 <= asa.width as i32,
+                "dpi {dpi}: icono de {talla} no cabe en un asa de {}",
+                asa.width
+            );
+            // A la altura del borde superior.
+            assert_eq!(
+                asa.y + asa.height as i32 / 2,
+                vista.y,
+                "dpi {dpi}: no está a la altura del borde superior"
+            );
+        }
+    }
+
+    /// Un asa del tamaño real (6 px lógicos a 100 %) tiene que pintar algo:
+    /// si `Ellipse` con una caja tan pequeña no rellenara nada, el asa sería
+    /// invisible aunque el código se ejecute.
+    #[test]
+    fn un_asa_de_seis_pixeles_sigue_pintando() {
+        let rojo = COLORREF(0x0000FF);
+        let bits = pintar_en_dib(|dc| {
+            // SAFETY: DC de memoria vivo con un DIB seleccionado.
+            unsafe { circulo_relleno(dc, Rect::new(17, 17, 6, 6), rojo, rojo) };
+        });
+        let cuenta = (0..40)
+            .flat_map(|x| (0..40).map(move |y| (x, y)))
+            .filter(|&(x, y)| pintado(&bits, x, y))
+            .count();
+        assert!(cuenta >= 8, "un asa de 6 px solo pinta {cuenta} píxeles");
+    }
 }

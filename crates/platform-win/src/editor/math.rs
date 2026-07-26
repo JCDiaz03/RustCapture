@@ -126,6 +126,41 @@ pub(crate) fn toolbar() -> Vec<Elemento> {
 
 /// Lado LÓGICO de las asas del objeto seleccionado.
 pub(crate) const ASA_LOGICA: i32 = 6;
+/// Separación LÓGICA entre el borde derecho del recuadro y el CENTRO del
+/// asa de rotación. Mayor que el radio del asa, para que no pise el
+/// recuadro.
+pub(crate) const SEPARACION_LOGICA: i32 = 26;
+/// Holgura LÓGICA alrededor del icono dentro del botón redondo del asa.
+pub(crate) const ASA_ROT_MARGEN: i32 = 4;
+/// Paso del snap de rotación con Shift.
+const SNAP_GRADOS: f32 = 15.0;
+
+/// Asa de rotación: botón REDONDO de `diametro` a la DERECHA de la esquina
+/// superior derecha, a la altura del borde superior. Fuera del recuadro para
+/// no tapar contenido, y redondo con icono para no confundirse con las 8
+/// asas cuadradas de redimensionado.
+pub(crate) fn asa_rotacion(caja: Rect, diametro: i32, separacion: i32) -> Rect {
+    let lado = diametro.max(4);
+    let cx = caja.right() as i32 + separacion;
+    let cy = caja.y;
+    Rect::new(cx - lado / 2, cy - lado / 2, lado as u32, lado as u32)
+}
+
+/// Ángulo del vector centro→p medido desde ARRIBA y creciendo en el sentido
+/// de las agujas del reloj, que es como gira `Giro` (Y hacia abajo).
+pub(crate) fn angulo_hacia(centro: (i32, i32), p: (i32, i32)) -> f32 {
+    let (dx, dy) = ((p.0 - centro.0) as f32, (p.1 - centro.1) as f32);
+    dx.atan2(-dy)
+}
+
+/// Redondea a múltiplos de 15° cuando `snap` (Shift pulsado).
+pub(crate) fn ajustar_angulo(rad: f32, snap: bool) -> f32 {
+    if !snap {
+        return rad;
+    }
+    let paso = SNAP_GRADOS.to_radians();
+    (rad / paso).round() * paso
+}
 
 /// Las 8 asas de un rect (esquinas + puntos medios de cada lado), como
 /// rects de lado `asa` centrados en cada punto. En coordenadas de vista.
@@ -347,6 +382,56 @@ mod tests {
                 assert_ne!(a[i], a[j], "asas {i} y {j} coinciden");
             }
         }
+    }
+
+    #[test]
+    fn el_asa_de_rotacion_va_fuera_de_la_esquina_superior_derecha() {
+        // Caja 100×50 en (10,20): esquina sup. der. en (110, 20).
+        let caja = Rect::new(10, 20, 100, 50);
+        let asa = asa_rotacion(caja, 24, 26);
+        // Centro a la derecha del borde derecho, a la altura del superior.
+        assert_eq!(asa.x + asa.width as i32 / 2, 136); // 110 + 26
+        assert_eq!(asa.y + asa.height as i32 / 2, 20);
+        // No pisa el recuadro: su izquierda queda fuera del borde derecho.
+        assert!(
+            asa.x >= caja.right() as i32,
+            "el asa pisa el recuadro: x {} vs borde derecho {}",
+            asa.x,
+            caja.right()
+        );
+    }
+
+    #[test]
+    fn la_separacion_supera_el_radio_del_asa() {
+        // Invariante del diseño: con la holgura por defecto el botón nunca
+        // solapa el recuadro. 16 px de icono + 2×4 de margen = 24 de
+        // diámetro, radio 12 < SEPARACION_LOGICA.
+        let diametro = 16 + 2 * ASA_ROT_MARGEN;
+        assert!(
+            SEPARACION_LOGICA > diametro / 2,
+            "separación {SEPARACION_LOGICA} no despega un asa de diámetro {diametro}"
+        );
+    }
+
+    #[test]
+    fn el_angulo_se_mide_desde_arriba_en_el_sentido_del_reloj() {
+        use std::f32::consts::{FRAC_PI_2, PI};
+        let c = (10, 10);
+        assert!(angulo_hacia(c, (10, 0)).abs() < 0.01, "arriba debe ser 0");
+        assert!((angulo_hacia(c, (20, 10)) - FRAC_PI_2).abs() < 0.01, "derecha");
+        assert!((angulo_hacia(c, (10, 20)).abs() - PI).abs() < 0.01, "abajo");
+        assert!((angulo_hacia(c, (0, 10)) + FRAC_PI_2).abs() < 0.01, "izquierda");
+    }
+
+    #[test]
+    fn el_snap_redondea_a_quince_grados() {
+        let grados = |r: f32| r.to_degrees();
+        assert!((grados(ajustar_angulo(0.30, true)) - 15.0).abs() < 0.01);
+        assert!((grados(ajustar_angulo(0.20, true)) - 15.0).abs() < 0.01);
+        assert!(grados(ajustar_angulo(0.05, true)).abs() < 0.01);
+        assert!((grados(ajustar_angulo(-0.30, true)) + 15.0).abs() < 0.01);
+        // Sin snap el ángulo pasa tal cual.
+        assert_eq!(ajustar_angulo(0.3, false), 0.3);
     }
 
     #[test]

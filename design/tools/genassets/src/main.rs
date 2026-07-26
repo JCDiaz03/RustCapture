@@ -19,7 +19,7 @@ const TALLAS: [u32; 5] = [16, 20, 24, 28, 32];
 
 /// Inventario de iconos de esta fase, en el orden del enum generado.
 /// Añadir aquí (al final, para no invalidar índices) y regenerar.
-const ICONOS: [&str; 39] = [
+const ICONOS: [&str; 40] = [
     // Barra
     "sys-drag-handle",
     "capture-fullscreen",
@@ -61,6 +61,8 @@ const ICONOS: [&str; 39] = [
     "output-save-as",
     "output-print",
     "output-email",
+    // Asa de rotación del objeto seleccionado (f.53).
+    "edit-rotate",
 ];
 
 /// PNG del icono de app que entran en el .ico (lado, ¿se embebe como PNG?).

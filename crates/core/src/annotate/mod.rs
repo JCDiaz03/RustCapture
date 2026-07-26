@@ -5,6 +5,7 @@ pub mod annotations;
 mod canvas;
 mod censor;
 mod document;
+mod giro;
 mod objeto;
 mod shapes;
 mod style;
@@ -12,6 +13,7 @@ mod text;
 
 pub use canvas::Canvas;
 pub use document::{Command, Document, History};
-pub use objeto::Objeto;
+pub use giro::Giro;
+pub use objeto::{Forma, Objeto};
 pub use style::{CensorMode, Color, Style, TextStyle};
 pub use text::RenderContext;

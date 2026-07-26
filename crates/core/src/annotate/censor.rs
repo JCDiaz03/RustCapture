@@ -9,6 +9,7 @@
 //! Interno, como `shapes`: la API pública es `PixelateAnnotation`.
 
 use crate::annotate::canvas::Canvas;
+use crate::annotate::giro::Giro;
 use crate::annotate::style::Color;
 use crate::ports::Rect;
 
@@ -141,6 +142,103 @@ fn blur_1d(
             }
         }
     }
+}
+
+/// Censura girada: se muestrea el contenido en el espacio SIN girar del
+/// rect (leyendo del canvas por el punto ya girado, que es donde están los
+/// píxeles de verdad) y se escribe recorriendo la caja envolvente girada,
+/// deshaciendo el giro de cada píxel para saber qué le toca.
+///
+/// Así las celdas del mosaico se definen en el espacio del objeto y giran
+/// CON él, en vez de quedarse alineadas a la pantalla.
+pub(crate) fn censurar_girado(
+    canvas: &mut Canvas,
+    rect: Rect,
+    px: u32,
+    desenfocar: bool,
+    giro: Giro,
+) {
+    if rect.is_empty() {
+        return;
+    }
+    let centro = rect.centro();
+    let (w, h) = (rect.width as usize, rect.height as usize);
+
+    // 1. Muestreo del contenido en el espacio del objeto.
+    let mut origen = Vec::with_capacity(w * h * 3);
+    for fila in 0..h as i32 {
+        for col in 0..w as i32 {
+            let p = giro.aplicar((rect.x + col, rect.y + fila), centro);
+            let c = canvas.pixel(p.0, p.1).unwrap_or(Color::rgb(0, 0, 0));
+            origen.extend_from_slice(&[c.r, c.g, c.b]);
+        }
+    }
+
+    // 2. Filtrado, igual que sin girar pero sobre ese buffer.
+    let filtrado = if desenfocar {
+        let radio = (px.max(1) as usize).min(w.max(h));
+        let mut temp = vec![0u8; origen.len()];
+        let mut salida = origen.clone();
+        blur_1d(&origen, &mut temp, h, w, (3, w * 3), radio);
+        blur_1d(&temp, &mut salida, w, h, (w * 3, 3), radio);
+        salida
+    } else {
+        aplanar_por_celdas(&origen, (w, h), px.max(1) as usize)
+    };
+
+    // 3. Escritura recorriendo la caja girada con mapeo inverso.
+    let caja = Rect::bounding(&rect.corners().map(|c| giro.aplicar(c, centro)), 1);
+    for y in caja.y..caja.bottom() as i32 {
+        for x in caja.x..caja.right() as i32 {
+            let (ox, oy) = giro.deshacer((x as f32, y as f32), centro);
+            let (cx, cy) = (
+                (ox.round() as i32) - rect.x,
+                (oy.round() as i32) - rect.y,
+            );
+            if cx < 0 || cy < 0 || cx as usize >= w || cy as usize >= h {
+                continue;
+            }
+            let i = (cy as usize * w + cx as usize) * 3;
+            canvas.blend_pixel(
+                x,
+                y,
+                Color::rgb(filtrado[i], filtrado[i + 1], filtrado[i + 2]),
+            );
+        }
+    }
+}
+
+/// Aplana un buffer RGB por celdas de `bloque`×`bloque` a su color medio.
+fn aplanar_por_celdas(rgb: &[u8], (w, h): (usize, usize), bloque: usize) -> Vec<u8> {
+    let mut out = rgb.to_vec();
+    let mut cy = 0;
+    while cy < h {
+        let alto = bloque.min(h - cy);
+        let mut cx = 0;
+        while cx < w {
+            let ancho = bloque.min(w - cx);
+            let (mut r, mut g, mut b) = (0u32, 0u32, 0u32);
+            for dy in 0..alto {
+                for dx in 0..ancho {
+                    let i = ((cy + dy) * w + cx + dx) * 3;
+                    r += u32::from(rgb[i]);
+                    g += u32::from(rgb[i + 1]);
+                    b += u32::from(rgb[i + 2]);
+                }
+            }
+            let n = (ancho * alto) as u32;
+            let media = [(r / n) as u8, (g / n) as u8, (b / n) as u8];
+            for dy in 0..alto {
+                for dx in 0..ancho {
+                    let i = ((cy + dy) * w + cx + dx) * 3;
+                    out[i..i + 3].copy_from_slice(&media);
+                }
+            }
+            cx += ancho;
+        }
+        cy += alto;
+    }
+    out
 }
 
 #[cfg(test)]

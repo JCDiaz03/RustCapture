@@ -22,11 +22,31 @@ pub use text::TextAnnotation;
 
 use crate::annotate::canvas::Canvas;
 use crate::annotate::text::RenderContext;
+use crate::ports::Rect;
 
 /// Strategy de anotación (D5): renderiza sobre el canvas; al motor le da
 /// igual si debajo hay una captura o un fotograma de vídeo.
 pub trait Annotation {
     fn render(&self, canvas: &mut Canvas, ctx: &RenderContext);
+}
+
+/// Caja de una forma cuyo CONTORNO se estampa con `grosor`: el trazo
+/// sobresale medio grosor del borde geométrico por los cuatro lados.
+/// La comparten rectángulo y elipse.
+pub(crate) fn caja_con_trazo(rect: Rect, grosor: u32) -> Rect {
+    if rect.is_empty() {
+        return rect;
+    }
+    Rect::bounding(
+        &[
+            (rect.x, rect.y),
+            (
+                rect.x + rect.width as i32 - 1,
+                rect.y + rect.height as i32 - 1,
+            ),
+        ],
+        grosor.max(1) / 2,
+    )
 }
 
 #[cfg(test)]
@@ -168,6 +188,138 @@ mod tests {
         assert!(!es_rojo(&frame, 8, 8), "la línea sobrevivió a la censura");
     }
 
+    /// Familia «puntos»: girar 90° una línea horizontal la deja vertical, y
+    /// con la misma calidad (se rotan los extremos, no se remuestrea).
+    #[test]
+    fn la_linea_girada_noventa_grados_queda_vertical() {
+        use crate::annotate::Objeto;
+        let ctx = RenderContext::sin_fuente();
+        let mut o: Objeto = LineAnnotation {
+            from: (5, 15),
+            to: (25, 15),
+            style: ESTILO,
+        }
+        .into();
+        o.rotar(std::f32::consts::FRAC_PI_2);
+        let mut frame = Frame::filled(30, 30, [0, 0, 0, 255]);
+        o.render(&mut Canvas::new(&mut frame), &ctx);
+        // Centro (15,15): la línea pasa a ir de (15,5) a (15,25).
+        assert!(es_rojo(&frame, 15, 8) && es_rojo(&frame, 15, 22));
+        assert!(!es_rojo(&frame, 8, 15) && !es_rojo(&frame, 22, 15));
+    }
+
+    #[test]
+    fn el_lapiz_girado_mantiene_su_longitud_de_trazo() {
+        use crate::annotate::Objeto;
+        let ctx = RenderContext::sin_fuente();
+        let contar = |o: &Objeto| {
+            let mut f = Frame::filled(60, 60, [0, 0, 0, 255]);
+            o.render(&mut Canvas::new(&mut f), &ctx);
+            (0..60)
+                .flat_map(|x| (0..60).map(move |y| (x, y)))
+                .filter(|&(x, y)| es_rojo(&f, x, y))
+                .count()
+        };
+        let recto: Objeto = PenAnnotation {
+            points: vec![(10, 30), (25, 30), (40, 30)],
+            style: ESTILO,
+        }
+        .into();
+        let mut girado = recto.clone();
+        girado.rotar(std::f32::consts::FRAC_PI_2);
+        // Mismo trazo, otra orientación: los píxeles apenas cambian.
+        let (a, b) = (contar(&recto), contar(&girado));
+        assert!(b * 10 > a * 8 && a * 10 > b * 8, "recto {a} vs girado {b}");
+    }
+
+    #[test]
+    fn la_flecha_girada_conserva_su_cabeza() {
+        use crate::annotate::Objeto;
+        let ctx = RenderContext::sin_fuente();
+        // Flecha vertical hacia abajo tras girar 90° una horizontal.
+        let mut o: Objeto = ArrowAnnotation {
+            from: (10, 30),
+            to: (50, 30),
+            style: ESTILO,
+        }
+        .into();
+        o.rotar(std::f32::consts::FRAC_PI_2);
+        let mut frame = Frame::filled(60, 60, [0, 0, 0, 255]);
+        o.render(&mut Canvas::new(&mut frame), &ctx);
+        // Eje vertical por x=30, y la cabeza abre a ambos lados cerca de
+        // la punta inferior.
+        assert!(es_rojo(&frame, 30, 40));
+        let izq = (20..30).any(|x| (38..50).any(|y| es_rojo(&frame, x, y)));
+        let der = (31..42).any(|x| (38..50).any(|y| es_rojo(&frame, x, y)));
+        assert!(izq && der, "la cabeza no giró con el eje");
+    }
+
+    #[test]
+    fn el_rectangulo_girado_cuarenta_y_cinco_grados_es_un_rombo() {
+        use crate::annotate::Objeto;
+        let ctx = RenderContext::sin_fuente();
+        let mut o: Objeto = RectAnnotation {
+            rect: Rect::new(10, 10, 20, 20),
+            style: ESTILO,
+        }
+        .into();
+        o.rotar(std::f32::consts::FRAC_PI_4);
+        let mut frame = Frame::filled(50, 50, [0, 0, 0, 255]);
+        o.render(&mut Canvas::new(&mut frame), &ctx);
+        // Centro (19.5,19.5): el rombo toca arriba en su punto medio y la
+        // esquina del cuadrado original queda vacía.
+        assert!(
+            (17..23).any(|x| (4..8).any(|y| es_rojo(&frame, x, y))),
+            "falta el vértice superior del rombo"
+        );
+        assert!(!es_rojo(&frame, 10, 10), "la esquina original sigue pintada");
+    }
+
+    #[test]
+    fn el_resaltador_girado_rellena_su_rombo_y_no_la_caja() {
+        use crate::annotate::Objeto;
+        let ctx = RenderContext::sin_fuente();
+        let mut o: Objeto = HighlightAnnotation {
+            rect: Rect::new(10, 10, 20, 20),
+            color: Color::rgba(255, 255, 0, 128),
+        }
+        .into();
+        o.rotar(std::f32::consts::FRAC_PI_4);
+        let mut frame = Frame::filled(50, 50, [0, 0, 0, 255]);
+        o.render(&mut Canvas::new(&mut frame), &ctx);
+        let amarillo = |x, y| {
+            frame
+                .pixel(x, y)
+                .is_some_and(|[r, g, b, _]| r > 100 && g > 100 && b == 0)
+        };
+        assert!(amarillo(19, 19), "el centro debe quedar relleno");
+        assert!(!amarillo(11, 11), "la esquina de la caja no se rellena");
+    }
+
+    #[test]
+    fn la_elipse_girada_mueve_sus_extremos() {
+        use crate::annotate::Objeto;
+        let ctx = RenderContext::sin_fuente();
+        // Elipse ancha: sin girar toca izquierda y derecha en su eje.
+        let base = EllipseAnnotation {
+            rect: Rect::new(10, 20, 30, 10),
+            style: ESTILO,
+        };
+        let recta: Objeto = base.clone().into();
+        let mut girada: Objeto = base.into();
+        girada.rotar(std::f32::consts::FRAC_PI_2);
+        let pintar = |o: &Objeto| {
+            let mut f = Frame::filled(50, 50, [0, 0, 0, 255]);
+            o.render(&mut Canvas::new(&mut f), &ctx);
+            f
+        };
+        let (a, b) = (pintar(&recta), pintar(&girada));
+        // Centro (24.5, 24.5): la elipse ancha pasa a ser alta.
+        assert!(es_rojo(&a, 10, 24) || es_rojo(&a, 10, 25));
+        assert!(!es_rojo(&b, 10, 24) && !es_rojo(&b, 10, 25));
+        assert!((9..14).any(|y| es_rojo(&b, 24, y) || es_rojo(&b, 25, y)));
+    }
+
     fn ctx_con_fuente() -> RenderContext {
         let normal = std::fs::read("C:/Windows/Fonts/segoeui.ttf").expect("fuente del sistema");
         let bold = std::fs::read("C:/Windows/Fonts/segoeuib.ttf").expect("fuente del sistema");
@@ -257,6 +409,142 @@ mod tests {
         }
         .render(&mut Canvas::new(&mut frame), &RenderContext::sin_fuente());
         assert!(es_rojo(&frame, 20, 20));
+    }
+
+    #[test]
+    fn la_censura_girada_solo_tapa_su_rombo() {
+        use crate::annotate::Objeto;
+        let ctx = RenderContext::sin_fuente();
+        let mut frame = Frame::filled(50, 50, [255, 255, 255, 255]);
+        // Franja negra cruzando el centro, para ver el efecto.
+        for x in 0..50u32 {
+            let i = (25 * 50 + x as usize) * 4;
+            frame.pixels[i..i + 3].copy_from_slice(&[0, 0, 0]);
+        }
+        let mut o: Objeto = PixelateAnnotation {
+            rect: Rect::new(15, 15, 20, 20),
+            mode: CensorMode::Mosaic { block: 20 },
+        }
+        .into();
+        o.rotar(std::f32::consts::FRAC_PI_4);
+        o.render(&mut Canvas::new(&mut frame), &ctx);
+        // El centro se censura: deja de ser el negro puro de la franja.
+        assert_ne!(frame.pixel(25, 25), Some([0, 0, 0, 255]));
+        // Y la esquina de la caja, fuera del rombo, sigue blanca.
+        assert_eq!(frame.pixel(16, 16), Some([255, 255, 255, 255]));
+    }
+
+    #[test]
+    fn el_desenfoque_girado_no_deja_huecos_dentro_del_rombo() {
+        use crate::annotate::Objeto;
+        let ctx = RenderContext::sin_fuente();
+        let mut frame = Frame::filled(60, 60, [0, 0, 0, 255]);
+        for y in 0..60u32 {
+            for x in 0..60u32 {
+                if (x / 4 + y / 4) % 2 == 0 {
+                    let i = (y as usize * 60 + x as usize) * 4;
+                    frame.pixels[i..i + 3].copy_from_slice(&[255, 255, 255]);
+                }
+            }
+        }
+        let mut o: Objeto = PixelateAnnotation {
+            rect: Rect::new(20, 20, 20, 20),
+            mode: CensorMode::Blur { radius: 5 },
+        }
+        .into();
+        o.rotar(0.6);
+        o.render(&mut Canvas::new(&mut frame), &ctx);
+        // En el centro del rombo el damero se ha difuminado: ni negro puro
+        // ni blanco puro, y sin píxeles sin tocar (huecos del mapeo).
+        for (x, y) in [(29, 29), (30, 30), (31, 30), (29, 31)] {
+            let [r, ..] = frame.pixel(x, y).unwrap();
+            assert!(r > 10 && r < 245, "hueco o sin difuminar en ({x},{y}): {r}");
+        }
+    }
+
+    #[test]
+    fn el_texto_girado_cambia_de_orientacion_y_conserva_tinta() {
+        use crate::annotate::Objeto;
+        let ctx = ctx_con_fuente();
+        let medir = |o: &Objeto| {
+            let mut f = Frame::filled(140, 140, [0, 0, 0, 255]);
+            o.render(&mut Canvas::new(&mut f), &ctx);
+            let puntos: Vec<(u32, u32)> = (0..140)
+                .flat_map(|x| (0..140).map(move |y| (x, y)))
+                .filter(|&(x, y)| f.pixel(x, y).is_some_and(|[r, ..]| r > 60))
+                .collect();
+            assert!(!puntos.is_empty(), "no se pintó nada");
+            let w = puntos.iter().map(|p| p.0).max().unwrap()
+                - puntos.iter().map(|p| p.0).min().unwrap();
+            let h = puntos.iter().map(|p| p.1).max().unwrap()
+                - puntos.iter().map(|p| p.1).min().unwrap();
+            (puntos.len(), w, h)
+        };
+        let recto: Objeto = TextAnnotation {
+            pos: (40, 60),
+            text: "Hola".to_string(),
+            style: crate::annotate::style::TextStyle {
+                color: ROJO,
+                size: 24.0,
+                bold: true,
+            },
+        }
+        .into();
+        let mut girado = recto.clone();
+        girado.rotar(std::f32::consts::FRAC_PI_2);
+        let (n_recto, w_recto, h_recto) = medir(&recto);
+        let (n_girado, w_girado, h_girado) = medir(&girado);
+        // Girado 90°: ancho y alto se intercambian.
+        assert!(w_recto > h_recto, "el texto recto debe ser ancho");
+        assert!(h_girado > w_girado, "el texto girado debe ser alto");
+        // Y no se pierde ni se duplica tinta (holgura por el remuestreo).
+        assert!(
+            n_girado * 100 > n_recto * 60 && n_recto * 100 > n_girado * 60,
+            "tinta recto {n_recto} vs girado {n_girado}"
+        );
+    }
+
+    #[test]
+    fn el_numero_del_paso_gira_con_el_disco() {
+        use crate::annotate::Objeto;
+        let ctx = ctx_con_fuente();
+        // El disco es redondo: girar solo debe mover el número, no el disco.
+        let base = StepAnnotation {
+            center: (30, 30),
+            number: 7,
+            color: ROJO,
+            font_size: 26.0,
+        };
+        let radio = base.radius();
+        let pintar = |o: &Objeto| {
+            let mut f = Frame::filled(60, 60, [0, 0, 0, 255]);
+            o.render(&mut Canvas::new(&mut f), &ctx);
+            f
+        };
+        let recto: Objeto = base.clone().into();
+        let mut girado: Objeto = base.into();
+        girado.rotar(std::f32::consts::PI);
+        let (a, b) = (pintar(&recto), pintar(&girado));
+        // El disco sigue exactamente igual: su borde no se mueve.
+        for p in [(30, 30 - radio as i32 + 2), (30 - radio as i32 + 2, 30)] {
+            assert_eq!(
+                es_rojo(&a, p.0 as u32, p.1 as u32),
+                es_rojo(&b, p.0 as u32, p.1 as u32),
+                "el disco cambió en {p:?}"
+            );
+        }
+        // Y el número sí se ha movido (girado 180° no cae en los mismos px).
+        let blancos = |f: &Frame| -> Vec<(u32, u32)> {
+            (0..60)
+                .flat_map(|x| (0..60).map(move |y| (x, y)))
+                .filter(|&(x, y)| {
+                    f.pixel(x, y)
+                        .is_some_and(|[r, g, b, _]| r > 200 && g > 200 && b > 200)
+                })
+                .collect()
+        };
+        assert!(!blancos(&a).is_empty() && !blancos(&b).is_empty());
+        assert_ne!(blancos(&a), blancos(&b), "el número no giró");
     }
 
     #[test]

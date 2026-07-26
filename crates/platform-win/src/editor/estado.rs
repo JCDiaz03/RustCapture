@@ -147,6 +147,25 @@ impl MoverDrag {
     }
 }
 
+/// Arrastre del asa de rotación. Como `MoverDrag`, no toca el documento: el
+/// giro se pinta como preview y se convierte en `Command::Rotate` al soltar.
+pub(super) struct GirarDrag {
+    pub index: usize,
+    /// Centro de giro en píxeles del frame (el de la caja sin girar).
+    pub centro: (i32, i32),
+    /// Ángulo del puntero al empezar y ahora; el delta es la diferencia.
+    pub inicial: f32,
+    pub actual: f32,
+    /// Snap a 15° activo (Shift pulsado al soltar).
+    pub snap: bool,
+}
+
+impl GirarDrag {
+    pub(super) fn delta(&self) -> f32 {
+        super::math::ajustar_angulo(self.actual - self.inicial, self.snap)
+    }
+}
+
 pub(super) struct EditorState {
     /// Captura original: el documento se re-renderiza siempre sobre ella.
     pub base: Frame,
@@ -172,6 +191,7 @@ pub(super) struct EditorState {
     /// objeto. Limpiar es predecible y cuesta nada.
     pub seleccionado: Option<usize>,
     pub mover: Option<MoverDrag>,
+    pub girar: Option<GirarDrag>,
     pub edit: Option<EditBox>,
     pub cerrado: bool,
     /// Documento cambiado desde el último guardado/copiado.
@@ -208,6 +228,7 @@ impl EditorState {
             drag: None,
             seleccionado: None,
             mover: None,
+            girar: None,
             edit: None,
             cerrado: false,
             dirty: false,

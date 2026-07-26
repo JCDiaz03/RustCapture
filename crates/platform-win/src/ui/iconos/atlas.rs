@@ -48,7 +48,8 @@ pub enum Icono {
     OutputSaveAs = 36,
     OutputPrint = 37,
     OutputEmail = 38,
+    EditRotate = 39,
 }
 
-pub const NUM_ICONOS: usize = 39;
+pub const NUM_ICONOS: usize = 40;
 pub const TALLAS: [u32; 5] = [16, 20, 24, 28, 32];
