@@ -11,6 +11,13 @@ members = [
 version = "0.1.0"
 edition = "2024"
 
+# Peso mínimo en release (f.4/f.5): compensa con creces los ~150 KB de
+# recursos embebidos (atlas de iconos + .ico).
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1
+
 [workspace.dependencies]
 rustcapture-core = { path = "crates/core" }
 platform-win = { path = "crates/platform-win" }

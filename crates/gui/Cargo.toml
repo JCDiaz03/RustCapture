@@ -10,3 +10,6 @@ path = "src/main.rs"
 [dependencies]
 rustcapture-core.workspace = true
 platform-win.workspace = true
+
+[build-dependencies]
+winresource = "0.1"

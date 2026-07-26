@@ -135,6 +135,7 @@ fn run(frame: Frame) -> windows::core::Result<()> {
             hInstance: instance.into(),
             lpszClassName: class,
             hCursor: LoadCursorW(None, IDC_ARROW)?,
+            hIcon: crate::ui::icono_app::para_clase(),
             hbrBackground: GetSysColorBrush(COLOR_APPWORKSPACE),
             ..Default::default()
         };

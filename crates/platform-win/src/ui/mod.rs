@@ -9,6 +9,7 @@
 
 pub(crate) mod boton;
 pub(crate) mod fuentes;
+pub(crate) mod icono_app;
 pub(crate) mod iconos;
 pub(crate) mod layout;
 pub(crate) mod theme;

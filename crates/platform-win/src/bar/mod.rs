@@ -97,6 +97,7 @@ impl Bar {
                 hInstance: instance.into(),
                 lpszClassName: class,
                 hCursor: LoadCursorW(None, IDC_ARROW)?,
+                hIcon: crate::ui::icono_app::para_clase(),
                 // Sin brocha de clase: WM_PAINT pinta todo el fondo con el
                 // tema y WM_ERASEBKGND devuelve 1 (sin parpadeo).
                 hbrBackground: HBRUSH::default(),

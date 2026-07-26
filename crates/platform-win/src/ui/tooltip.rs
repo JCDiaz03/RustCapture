@@ -2,8 +2,8 @@
 
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::Controls::{
-    TOOLTIPS_CLASSW, TTF_IDISHWND, TTF_SUBCLASS, TTM_ADDTOOLW, TTS_ALWAYSTIP, TTS_NOPREFIX,
-    TTTOOLINFOW,
+    ICC_WIN95_CLASSES, INITCOMMONCONTROLSEX, InitCommonControlsEx, TOOLTIPS_CLASSW, TTF_IDISHWND,
+    TTF_SUBCLASS, TTM_ADDTOOLW, TTS_ALWAYSTIP, TTS_NOPREFIX, TTTOOLINFOW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CW_USEDEFAULT, CreateWindowExW, DestroyWindow, SendMessageW, WINDOW_EX_STYLE, WINDOW_STYLE,
@@ -20,6 +20,17 @@ pub(crate) struct Tooltips {
 
 impl Tooltips {
     pub(crate) fn nuevo(padre: HWND) -> Result<Self> {
+        // Con el manifest de comctl32 v6, el registro de las clases
+        // comunes es explícito; una sola vez por proceso.
+        static INIT: std::sync::Once = std::sync::Once::new();
+        INIT.call_once(|| {
+            let icc = INITCOMMONCONTROLSEX {
+                dwSize: size_of::<INITCOMMONCONTROLSEX>() as u32,
+                dwICC: ICC_WIN95_CLASSES,
+            };
+            // SAFETY: struct local completo; sin más precondiciones.
+            unsafe { _ = InitCommonControlsEx(&icc) };
+        });
         // SAFETY: creación estándar de un control comctl32 sin padre de
         // clase propia; el HWND se destruye en Drop.
         let hwnd = unsafe {

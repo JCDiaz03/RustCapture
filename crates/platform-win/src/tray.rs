@@ -6,9 +6,10 @@ use windows::Win32::UI::Shell::{
     NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW, Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, IDI_APPLICATION, LoadIconW,
-    MF_SEPARATOR, MF_STRING, PostMessageW, SetForegroundWindow, TPM_BOTTOMALIGN, TrackPopupMenu,
-    WM_COMMAND, WM_CONTEXTMENU, WM_LBUTTONUP, WM_RBUTTONUP,
+    AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, GetSystemMetrics, IDI_APPLICATION,
+    LoadIconW, MF_SEPARATOR, MF_STRING, PostMessageW, SM_CXSMICON, SM_CYSMICON,
+    SetForegroundWindow, TPM_BOTTOMALIGN, TrackPopupMenu, WM_COMMAND, WM_CONTEXTMENU,
+    WM_LBUTTONUP, WM_RBUTTONUP,
 };
 use windows::core::w;
 
@@ -32,8 +33,16 @@ impl Tray {
             uID: 1,
             uFlags: NIF_MESSAGE | NIF_ICON | NIF_TIP,
             uCallbackMessage: WM_TRAY,
-            // SAFETY: icono de stock del sistema; no se libera.
-            hIcon: unsafe { LoadIconW(None, IDI_APPLICATION)? },
+            // Icono propio embebido a tamaño de bandeja; en binarios sin
+            // recursos cae al de stock del sistema.
+            // SAFETY: los iconos de recurso/stock no se liberan a mano.
+            hIcon: unsafe {
+                crate::ui::icono_app::a_medida(
+                    GetSystemMetrics(SM_CXSMICON),
+                    GetSystemMetrics(SM_CYSMICON),
+                )
+                .map_or_else(|| LoadIconW(None, IDI_APPLICATION), Ok)?
+            },
             ..Default::default()
         };
         let tip: Vec<u16> = "RustCapture".encode_utf16().collect();
