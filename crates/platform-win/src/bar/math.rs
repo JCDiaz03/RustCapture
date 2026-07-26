@@ -1,9 +1,10 @@
 //! Composición pura de la fila de la barra V4: qué botones hay, en qué
 //! orden, cuáles llevan lógica y cuáles esperan su fase. Testeable sin
-//! ventanas; `mod.rs` solo materializa lo que se decide aquí.
+//! ventanas; `mod.rs` solo materializa lo que se decide aquí (vía
+//! `ui::botonera`).
 
+use crate::ui::botonera::{BotonDef, Elemento, boton};
 use crate::ui::iconos::Icono;
-use crate::ui::layout::Item;
 
 /// Alto lógico de la barra: botón de 28 + rejilla de 4 arriba y abajo.
 pub(crate) const ALTO_LOGICO: i32 = 36;
@@ -35,36 +36,15 @@ pub(crate) enum HotkeyTooltip {
     Delay,
 }
 
-pub(crate) struct BotonDef {
-    pub id: u16,
-    pub icono: Icono,
-    pub nombre: &'static str,
-    /// false = sin lógica todavía: se muestra deshabilitado (decisión 5).
-    pub habilitado: bool,
-    /// Tinte #D83B01 (grabación) en reposo.
-    pub grabacion: bool,
-    pub hotkey: Option<HotkeyTooltip>,
-}
-
-pub(crate) enum Elemento {
-    Asa,
-    Separador,
-    Boton(BotonDef),
-}
-
-const fn boton(id: u16, icono: Icono, nombre: &'static str, habilitado: bool) -> Elemento {
-    Elemento::Boton(BotonDef { id, icono, nombre, habilitado, grabacion: false, hotkey: None })
-}
-
-const fn boton_hk(id: u16, icono: Icono, nombre: &'static str, hk: HotkeyTooltip) -> Elemento {
-    Elemento::Boton(BotonDef {
-        id,
-        icono,
-        nombre,
-        habilitado: true,
-        grabacion: false,
-        hotkey: Some(hk),
-    })
+/// Botón → hotkey de config que anuncia su tooltip (solo los vivos).
+pub(crate) fn hotkey_tooltip(id: u16) -> Option<HotkeyTooltip> {
+    match id {
+        ID_FULLSCREEN => Some(HotkeyTooltip::Fullscreen),
+        ID_WINDOW => Some(HotkeyTooltip::Window),
+        ID_REGION => Some(HotkeyTooltip::Region),
+        ID_DELAY => Some(HotkeyTooltip::Delay),
+        _ => None,
+    }
 }
 
 /// La fila completa de la barra, en orden visual (mockup V1 + delay f.17).
@@ -72,14 +52,14 @@ pub(crate) fn fila() -> Vec<Elemento> {
     use Icono::*;
     vec![
         Elemento::Asa,
-        boton_hk(ID_FULLSCREEN, CaptureFullscreen, "Pantalla completa", HotkeyTooltip::Fullscreen),
-        boton_hk(ID_WINDOW, CaptureWindow, "Ventana activa", HotkeyTooltip::Window),
+        boton(ID_FULLSCREEN, CaptureFullscreen, "Pantalla completa", true),
+        boton(ID_WINDOW, CaptureWindow, "Ventana activa", true),
         boton(ID_OBJECT, CaptureObject, "Objeto de ventana", false),
-        boton_hk(ID_REGION, CaptureRegion, "Región", HotkeyTooltip::Region),
+        boton(ID_REGION, CaptureRegion, "Región", true),
         boton(ID_FREEHAND, CaptureFreehand, "Mano alzada", false),
         boton(ID_FIXED, CaptureFixed, "Región fija", false),
         boton(ID_SCROLL, CaptureScroll, "Captura con scroll", false),
-        boton_hk(ID_DELAY, CaptureDelay, "Captura con retardo", HotkeyTooltip::Delay),
+        boton(ID_DELAY, CaptureDelay, "Captura con retardo", true),
         Elemento::Separador,
         Elemento::Boton(BotonDef {
             id: ID_RECORD,
@@ -87,7 +67,6 @@ pub(crate) fn fila() -> Vec<Elemento> {
             nombre: "Grabar vídeo",
             habilitado: false,
             grabacion: true,
-            hotkey: None,
         }),
         Elemento::Separador,
         boton(ID_EYEDROPPER, UtilEyedropper, "Cuentagotas", false),
@@ -100,17 +79,6 @@ pub(crate) fn fila() -> Vec<Elemento> {
         boton(ID_COLLAPSE, SysCollapse, "Colapsar barra", false),
         boton(ID_CLOSE, SysClose, "Salir", true),
     ]
-}
-
-/// Proyección de la fila a los items geométricos de `ui::layout`.
-pub(crate) fn a_items(fila: &[Elemento]) -> Vec<Item> {
-    fila.iter()
-        .map(|e| match e {
-            Elemento::Asa => Item::Asa,
-            Elemento::Separador => Item::Separador,
-            Elemento::Boton(_) => Item::Boton,
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -155,7 +123,7 @@ mod tests {
     fn los_habilitados_de_captura_anuncian_su_hotkey() {
         let fila = fila();
         for b in botones(&fila) {
-            if b.hotkey.is_some() {
+            if hotkey_tooltip(b.id).is_some() {
                 assert!(b.habilitado, "{} con tooltip de hotkey pero deshabilitado", b.nombre);
             }
         }
@@ -173,7 +141,7 @@ mod tests {
     #[test]
     fn la_fila_cabe_en_una_sola_linea_de_36_logicos() {
         let fila = fila();
-        let items = a_items(&fila);
+        let items = crate::ui::botonera::a_items(&fila);
         assert_eq!(items.len(), fila.len());
         let escala = Escala::nueva(96);
         let (cajas, ancho) = layout::distribuir(&items, escala, escala.px(ALTO_LOGICO), None);

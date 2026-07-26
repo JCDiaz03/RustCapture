@@ -26,8 +26,6 @@ pub fn ensure_per_monitor_dpi_awareness() -> bool {
 }
 
 /// Conversor de unidades lógicas (rejilla a 96 dpi) a píxeles físicos.
-// PENDIENTE(F3.5): retirar el allow cuando las superficies escalen (S3+).
-#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) struct Escala(u32);
 
@@ -55,7 +53,8 @@ impl Escala {
 }
 
 /// DPI nuevo que trae `WM_DPICHANGED` en su wparam (ambos ejes son iguales).
-// PENDIENTE(F3.5): retirar el allow cuando las superficies escalen (S3+).
+// Documenta el contrato del mensaje; las superficies actuales resuelven
+// con GetDpiForWindow tras aplicar el rect y no lo necesitan.
 #[allow(dead_code)]
 pub(crate) const fn dpi_de_wparam(wparam: WPARAM) -> u32 {
     (wparam.0 & 0xFFFF) as u32
@@ -63,8 +62,6 @@ pub(crate) const fn dpi_de_wparam(wparam: WPARAM) -> u32 {
 
 /// Aplica el rect sugerido por `WM_DPICHANGED`: mover/redimensionar la
 /// ventana exactamente ahí evita bucles de rebote entre monitores.
-// PENDIENTE(F3.5): retirar el allow cuando las superficies escalen (S3+).
-#[allow(dead_code)]
 pub(crate) fn aplicar_rect_sugerido(hwnd: HWND, lparam: LPARAM) {
     // SAFETY: en WM_DPICHANGED el lparam apunta a un RECT válido que posee
     // el sistema durante el mensaje; solo se lee.

@@ -15,7 +15,8 @@ use crate::dpi::Escala;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub(crate) enum Rol {
-    /// Segoe UI 13 — cuerpo.
+    /// Segoe UI 13 — cuerpo (token del diseño; lo estrenará Ajustes V10).
+    #[allow(dead_code)]
     Cuerpo,
     /// Segoe UI 12 — denso / chips.
     Denso,

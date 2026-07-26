@@ -5,9 +5,7 @@ use windows::Win32::System::Diagnostics::Debug::MessageBeep;
 use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
 use windows::core::PCWSTR;
 
-fn wide(s: &str) -> Vec<u16> {
-    s.encode_utf16().chain(std::iter::once(0)).collect()
-}
+use crate::util::wide;
 
 /// Beep de error no bloqueante (hotkey no registrable, captura fallida).
 pub fn error_beep() {

@@ -15,3 +15,4 @@ pub mod overlay;
 pub mod pixels;
 pub mod tray;
 pub(crate) mod ui;
+pub(crate) mod util;

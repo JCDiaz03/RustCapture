@@ -4,8 +4,8 @@
 
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    CreateSolidBrush, DeleteObject, FillRect, GetStockObject, HBRUSH, InvalidateRect, NULL_PEN,
-    RoundRect, SelectObject,
+    CreateSolidBrush, DeleteObject, GetStockObject, InvalidateRect, NULL_PEN, RoundRect,
+    SelectObject,
 };
 use windows::Win32::UI::Controls::{DRAWITEMSTRUCT, ODS_DISABLED, ODS_SELECTED, WM_MOUSELEAVE};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
@@ -164,7 +164,7 @@ pub(crate) fn pintar_drawitem(dis: &DRAWITEMSTRUCT) -> bool {
     let deshabilitado = (dis.itemState.0 & ODS_DISABLED.0) != 0;
 
     // Fondo base = superficie del padre (el botón cubre todo su rect).
-    rellenar(dis, paleta.superficie);
+    crate::ui::lienzo::rellenar(dis.hDC, &dis.rcItem, paleta.superficie);
 
     // Fondo de estado con esquinas redondeadas (radio 4 lógico).
     let fondo = if estado.activo {
@@ -208,12 +208,3 @@ pub(crate) fn pintar_drawitem(dis: &DRAWITEMSTRUCT) -> bool {
     true
 }
 
-fn rellenar(dis: &DRAWITEMSTRUCT, color: COLORREF) {
-    // SAFETY: DC y rect del DRAWITEMSTRUCT, válidos durante el mensaje;
-    // brocha propia liberada tras el FillRect.
-    unsafe {
-        let brocha: HBRUSH = CreateSolidBrush(color);
-        FillRect(dis.hDC, &dis.rcItem, brocha);
-        _ = DeleteObject(brocha.into());
-    }
-}

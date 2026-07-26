@@ -3,8 +3,8 @@
 
 use rustcapture_core::ports::Rect;
 
+use crate::ui::botonera::{Elemento, boton};
 use crate::ui::iconos::Icono;
-use crate::ui::layout::Item;
 
 /// Alto LÓGICO de la toolbar (botón 28 + rejilla 4 arriba/abajo).
 pub(crate) const TOOLBAR_LOGICO: i32 = 36;
@@ -72,23 +72,6 @@ pub(crate) const ID_REDO: u16 = 3024;
 pub(crate) const ID_PRINT: u16 = 3025;
 pub(crate) const ID_EMAIL: u16 = 3026;
 
-pub(crate) struct BotonDef {
-    pub id: u16,
-    pub icono: Icono,
-    pub nombre: &'static str,
-    pub habilitado: bool,
-}
-
-pub(crate) enum Elemento {
-    Separador,
-    Muelle,
-    Boton(BotonDef),
-}
-
-const fn boton(id: u16, icono: Icono, nombre: &'static str, habilitado: bool) -> Elemento {
-    Elemento::Boton(BotonDef { id, icono, nombre, habilitado })
-}
-
 /// Toolbar del editor V4: las herramientas del motor D5 en vivo (la
 /// activa se marca con el estado 'activo' del IconButton); pasos,
 /// leyenda, pixelado, goma, crop y resize esperan su fase.
@@ -119,16 +102,6 @@ pub(crate) fn toolbar() -> Vec<Elemento> {
         boton(ID_PRINT, OutputPrint, "Imprimir", false),
         boton(ID_EMAIL, OutputEmail, "Email", false),
     ]
-}
-
-pub(crate) fn a_items(fila: &[Elemento]) -> Vec<Item> {
-    fila.iter()
-        .map(|e| match e {
-            Elemento::Separador => Item::Separador,
-            Elemento::Muelle => Item::Muelle,
-            Elemento::Boton(_) => Item::Boton,
-        })
-        .collect()
 }
 
 /// Franjas verticales del cliente: toolbar y propiedades arriba, status
@@ -239,7 +212,7 @@ mod tests {
         assert_eq!(fit_rect((0, 0), (400, 300)), Rect::new(0, 0, 0, 0));
     }
 
-    fn botones(fila: &[Elemento]) -> Vec<&BotonDef> {
+    fn botones(fila: &[Elemento]) -> Vec<&crate::ui::botonera::BotonDef> {
         fila.iter()
             .filter_map(|e| match e {
                 Elemento::Boton(b) => Some(b),
@@ -258,7 +231,7 @@ mod tests {
         assert_eq!(ids.len(), n, "ids repetidos");
         let muelles = fila.iter().filter(|e| matches!(e, Elemento::Muelle)).count();
         assert_eq!(muelles, 1);
-        assert_eq!(a_items(&fila).len(), fila.len());
+        assert_eq!(crate::ui::botonera::a_items(&fila).len(), fila.len());
     }
 
     #[test]

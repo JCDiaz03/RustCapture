@@ -10,10 +10,9 @@ pub(crate) mod math;
 use rustcapture_core::ports::{Rect, ScreenSource};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, BitBlt, COLORONCOLOR, CreateSolidBrush, DT_NOPREFIX, DeleteObject, DrawTextW,
-    EndPaint, FillRect, FrameRect, GetMonitorInfoW, HDC, InvalidateRect,
-    MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, PAINTSTRUCT, SRCCOPY, SelectObject,
-    SetBkMode, SetStretchBltMode, SetTextColor, StretchBlt, TRANSPARENT,
+    BeginPaint, BitBlt, COLORONCOLOR, DT_NOPREFIX, DrawTextW, EndPaint, GetMonitorInfoW, HDC,
+    InvalidateRect, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint, PAINTSTRUCT,
+    SRCCOPY, SelectObject, SetBkMode, SetStretchBltMode, SetTextColor, StretchBlt, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, VK_ESCAPE};
@@ -23,7 +22,8 @@ use windows::core::w;
 use crate::dpi::Escala;
 use crate::gdi::GdiScreenSource;
 use crate::gdi::raii::{Dib, MemDc, ScreenDc, Selected};
-use crate::ui::{fuentes, theme};
+use crate::ui::{fuentes, lienzo, theme, ventana};
+use crate::util::punto;
 
 /// Estado del overlay; lo posee `select_region`, el wndproc solo lo usa.
 struct OverlayState {
@@ -174,16 +174,8 @@ fn run() -> windows::core::Result<Option<Rect>> {
 }
 
 fn state_mut<'a>(hwnd: HWND) -> Option<&'a mut OverlayState> {
-    // SAFETY: puntero puesto por WM_NCCREATE; el dueño (select_region)
-    // no lo toca mientras el bucle despacha mensajes.
-    unsafe { ((GetWindowLongPtrW(hwnd, GWLP_USERDATA)) as *mut OverlayState).as_mut() }
-}
-
-fn punto(lparam: LPARAM) -> (i32, i32) {
-    (
-        (lparam.0 & 0xFFFF) as i16 as i32,
-        ((lparam.0 >> 16) & 0xFFFF) as i16 as i32,
-    )
+    // El dueño (select_region) no toca el Box mientras el bucle despacha.
+    ventana::estado::<OverlayState>(hwnd)
 }
 
 extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -192,8 +184,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
     unsafe {
         match msg {
             WM_NCCREATE => {
-                let cs = &*(lparam.0 as *const CREATESTRUCTW);
-                SetWindowLongPtrW(hwnd, GWLP_USERDATA, cs.lpCreateParams as isize);
+                ventana::adoptar_estado(hwnd, lparam);
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }
             WM_ERASEBKGND => LRESULT(1), // el doble buffer pinta todo
@@ -315,15 +306,13 @@ fn pintar(hdc: HDC, state: &mut OverlayState, escala: Escala) -> windows::core::
                 sel.y,
                 SRCCOPY,
             )?;
-            let acento = CreateSolidBrush(theme::actual().paleta().acento);
             let marco = RECT {
                 left: sel.x - 1,
                 top: sel.y - 1,
                 right: sel.x + sel.width as i32 + 1,
                 bottom: sel.y + sel.height as i32 + 1,
             };
-            FrameRect(back_dc.0, &marco, acento);
-            _ = DeleteObject(acento.into());
+            lienzo::marco(back_dc.0, &marco, theme::actual().paleta().acento);
         }
         // 3. Caja de lupa.
         pintar_lupa(&back_dc, &src_dc, state, seleccion, escala)?;
@@ -425,15 +414,14 @@ fn pintar_lupa(
         // Píxel del cursor recuadrado en acento (doble marco = 2 px).
         let px = bx + (state.cursor.0 - fuente.x) * celda;
         let py = by + (state.cursor.1 - fuente.y) * celda;
-        let acento = CreateSolidBrush(paleta.acento);
         for inflado in [1, 0] {
-            let marco = RECT {
+            let recuadro = RECT {
                 left: px - inflado,
                 top: py - inflado,
                 right: px + celda + inflado,
                 bottom: py + celda + inflado,
             };
-            FrameRect(back_dc.0, &marco, acento);
+            lienzo::marco(back_dc.0, &recuadro, paleta.acento);
         }
 
         // Bloque de información: hex + coordenadas y tamaño de selección.
@@ -443,9 +431,7 @@ fn pintar_lupa(
             right: caja.right,
             bottom: caja.bottom,
         };
-        let superficie = CreateSolidBrush(paleta.superficie);
-        FillRect(back_dc.0, &info_rect, superficie);
-        _ = DeleteObject(superficie.into());
+        lienzo::rellenar(back_dc.0, &info_rect, paleta.superficie);
 
         let (b, g, r) = pixel_bajo_el_cursor(state);
         let linea1 = format!(
@@ -480,10 +466,7 @@ fn pintar_lupa(
         SelectObject(back_dc.0, fuente_previa);
 
         // Marco exterior de la caja completa.
-        let borde = CreateSolidBrush(paleta.borde);
-        FrameRect(back_dc.0, &caja, borde);
-        _ = DeleteObject(borde.into());
-        _ = DeleteObject(acento.into());
+        lienzo::marco(back_dc.0, &caja, paleta.borde);
     }
     Ok(())
 }

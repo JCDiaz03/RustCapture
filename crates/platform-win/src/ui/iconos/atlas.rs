@@ -3,6 +3,9 @@
 
 /// Iconos disponibles en los atlas A8. El discriminante es el índice
 /// dentro de cada `atlas_N.bin` (offset del icono = índice × lado²).
+// El inventario va por delante de los consumidores a propósito
+// (iconos de fases futuras ya generados).
+#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 #[repr(usize)]
 pub enum Icono {

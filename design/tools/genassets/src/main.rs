@@ -149,6 +149,9 @@ fn generar_atlas_rs() -> String {
     s.push_str("// Regenerar: cd design/tools/genassets && cargo run\n\n");
     s.push_str("/// Iconos disponibles en los atlas A8. El discriminante es el índice\n");
     s.push_str("/// dentro de cada `atlas_N.bin` (offset del icono = índice × lado²).\n");
+    s.push_str("// El inventario va por delante de los consumidores a propósito\n");
+    s.push_str("// (iconos de fases futuras ya generados).\n");
+    s.push_str("#[allow(dead_code)]\n");
     s.push_str("#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]\n");
     s.push_str("#[repr(usize)]\n");
     s.push_str("pub enum Icono {\n");

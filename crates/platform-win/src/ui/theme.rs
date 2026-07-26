@@ -18,7 +18,9 @@ pub(crate) enum Tema {
 
 /// Tokens de color en COLORREF (0x00BBGGRR).
 pub(crate) struct Paleta {
-    /// Fondo de ventana.
+    /// Fondo de ventana (token del diseño; lo estrenará Ajustes V10 —
+    /// barra y editor pintan sobre `superficie`).
+    #[allow(dead_code)]
     pub fondo: COLORREF,
     /// Paneles y barras sobre el fondo.
     pub superficie: COLORREF,

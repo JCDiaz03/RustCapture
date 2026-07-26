@@ -20,10 +20,9 @@ use rustcapture_core::output::{ImageFormat, encode};
 use rustcapture_core::ports::{Frame, OutputError, OutputSink, Rect};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, BitBlt, CreateSolidBrush, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, DeleteObject,
-    DrawTextW, EndPaint, FillRect, HALFTONE, HBRUSH, HDC, InvalidateRect, PAINTSTRUCT,
-    RDW_ALLCHILDREN, RDW_ERASE, RDW_INVALIDATE, RedrawWindow, SRCCOPY, SelectObject, SetBkMode,
-    SetStretchBltMode, SetTextColor, StretchBlt, TRANSPARENT,
+    BeginPaint, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, DrawTextW, EndPaint, HALFTONE, HBRUSH,
+    HDC, InvalidateRect, PAINTSTRUCT, SRCCOPY, SelectObject, SetBkMode, SetStretchBltMode,
+    SetTextColor, StretchBlt, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::DRAWITEMSTRUCT;
@@ -35,11 +34,12 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{PCWSTR, w};
 
 use crate::dpi::{self, Escala};
-use crate::gdi::raii::{Dib, MemDc, ScreenDc, Selected};
-use crate::ui::{boton, fuentes, layout, theme, tooltip::Tooltips};
+use crate::gdi::raii::Selected;
+use crate::ui::botonera;
+use crate::ui::{boton, fuentes, lienzo, theme, ventana};
+use crate::util::{punto, wide};
 
 use estado::{DragState, EditorState};
-use math::Elemento;
 use texto::{ID_EDIT_TEXT, WM_APP_CANCEL_TEXT};
 
 /// Mensaje al wndproc de la barra: wparam = `Box<Frame>` crudo, el
@@ -90,19 +90,6 @@ impl OutputSink for EditorSink {
         }
         Ok(())
     }
-}
-
-fn wide(s: &str) -> Vec<u16> {
-    s.encode_utf16().chain(std::iter::once(0)).collect()
-}
-
-// PENDIENTE(limpieza): duplicada en overlay/mod.rs (y `wide` está en
-// alerts); extraer a un módulo util interno del crate.
-fn punto(lparam: LPARAM) -> (i32, i32) {
-    (
-        (lparam.0 & 0xFFFF) as i16 as i32,
-        ((lparam.0 >> 16) & 0xFFFF) as i16 as i32,
-    )
 }
 
 /// Abre el editor con la captura y bloquea el hilo de UI hasta cerrarlo.
@@ -169,51 +156,14 @@ fn run(frame: Frame) -> windows::core::Result<()> {
 }
 
 fn state_mut<'a>(hwnd: HWND) -> Option<&'a mut EditorState> {
-    // SAFETY: puntero puesto por WM_NCCREATE; liberado solo tras el
-    // bucle modal (nunca aquí).
-    unsafe { ((GetWindowLongPtrW(hwnd, GWLP_USERDATA)) as *mut EditorState).as_mut() }
-}
-
-/// Layout actual de la toolbar al DPI/ancho de la ventana.
-fn distribuye_toolbar(hwnd: HWND) -> (Vec<Elemento>, Vec<layout::Caja>) {
-    let escala = Escala::from_hwnd(hwnd);
-    let mut client = RECT::default();
-    // SAFETY: consulta del client rect de una ventana viva.
-    unsafe { _ = GetClientRect(hwnd, &mut client) };
-    let fila = math::toolbar();
-    let items = math::a_items(&fila);
-    let (cajas, _) = layout::distribuir(
-        &items,
-        escala,
-        escala.px(math::TOOLBAR_LOGICO),
-        Some(client.right - client.left),
-    );
-    (fila, cajas)
+    // El Box vive hasta después del bucle modal (nunca se libera aquí).
+    ventana::estado::<EditorState>(hwnd)
 }
 
 fn crear_toolbar(hwnd: HWND) {
-    let (fila, cajas) = distribuye_toolbar(hwnd);
-    let mut tooltips = Tooltips::nuevo(hwnd).ok();
-    for (elemento, caja) in fila.iter().zip(&cajas) {
-        let Elemento::Boton(def) = elemento else {
-            continue;
-        };
-        let Ok(control) = boton::crear(
-            hwnd,
-            def.id,
-            *caja,
-            boton::Opciones {
-                icono: def.icono,
-                habilitado: def.habilitado,
-                grabacion: false,
-            },
-        ) else {
-            continue;
-        };
-        if def.habilitado && let Some(tt) = tooltips.as_mut() {
-            _ = tt.agregar(control, def.nombre);
-        }
-    }
+    let fila = math::toolbar();
+    let (cajas, _) = botonera::cajas(hwnd, &fila, math::TOOLBAR_LOGICO, true);
+    let tooltips = botonera::crear(hwnd, &fila, &cajas, |def| def.nombre.to_string());
     if let Some(state) = state_mut(hwnd) {
         state.tooltips = tooltips;
         // Sin fuentes del sistema no hay herramienta de texto.
@@ -232,26 +182,9 @@ fn crear_toolbar(hwnd: HWND) {
 /// Recoloca la toolbar tras WM_SIZE / WM_DPICHANGED (el muelle depende
 /// del ancho del cliente).
 fn reposicionar_toolbar(hwnd: HWND) {
-    let (fila, cajas) = distribuye_toolbar(hwnd);
-    for (elemento, caja) in fila.iter().zip(&cajas) {
-        let Elemento::Boton(def) = elemento else {
-            continue;
-        };
-        // SAFETY: mover controles hijos propios desde su hilo.
-        unsafe {
-            if let Ok(control) = GetDlgItem(Some(hwnd), i32::from(def.id)) {
-                _ = SetWindowPos(
-                    control,
-                    None,
-                    caja.x,
-                    caja.y,
-                    caja.ancho,
-                    caja.alto,
-                    SWP_NOZORDER | SWP_NOACTIVATE,
-                );
-            }
-        }
-    }
+    let fila = math::toolbar();
+    let (cajas, _) = botonera::cajas(hwnd, &fila, math::TOOLBAR_LOGICO, true);
+    botonera::reposicionar(hwnd, &fila, &cajas);
 }
 
 /// Refleja la herramienta activa en la toolbar (estado 'activo' en acento).
@@ -434,8 +367,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
     unsafe {
         match msg {
             WM_NCCREATE => {
-                let cs = &*(lparam.0 as *const CREATESTRUCTW);
-                SetWindowLongPtrW(hwnd, GWLP_USERDATA, cs.lpCreateParams as isize);
+                ventana::adoptar_estado(hwnd, lparam);
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }
             WM_CREATE => {
@@ -580,15 +512,8 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 LRESULT(0)
             }
             WM_SETTINGCHANGE => {
-                if theme::es_cambio_de_tema(lparam) {
-                    let tema = theme::refrescar_con_modo_actual();
+                if let Some(tema) = ventana::cambio_de_tema(hwnd, lparam) {
                     theme::aplicar_titulo_oscuro(hwnd, tema.es_oscuro());
-                    _ = RedrawWindow(
-                        Some(hwnd),
-                        None,
-                        None,
-                        RDW_ERASE | RDW_INVALIDATE | RDW_ALLCHILDREN,
-                    );
                 }
                 LRESULT(0)
             }
@@ -642,47 +567,39 @@ fn pintar(hwnd: HWND, hdc: HDC, state: &mut EditorState) -> windows::core::Resul
             escala.px(math::STATUS_LOGICO),
         );
 
-        let screen = ScreenDc::get()?;
-        let back_dc = MemDc::compatible_with(&screen)?;
-        let back = Dib::new_32bpp(&back_dc, ancho as u32, alto as u32)?;
-        let _b = Selected::bitmap(&back_dc, &back)?;
+        let back = lienzo::BackBuffer::nuevo(ancho, alto)?;
+        let back_dc_h = back.dc();
 
         // Bandas superiores y status: superficie. Canvas: fondo de canvas.
-        let superficie = CreateSolidBrush(paleta.superficie);
-        FillRect(
-            back_dc.0,
+        lienzo::rellenar(
+            back_dc_h,
             &RECT { left: 0, top: 0, right: ancho, bottom: reparto.props_fin },
-            superficie,
+            paleta.superficie,
         );
-        FillRect(
-            back_dc.0,
+        lienzo::rellenar(
+            back_dc_h,
             &RECT { left: 0, top: reparto.status_inicio, right: ancho, bottom: alto },
-            superficie,
+            paleta.superficie,
         );
-        _ = DeleteObject(superficie.into());
-        let fondo_canvas = CreateSolidBrush(paleta.canvas);
-        FillRect(
-            back_dc.0,
+        lienzo::rellenar(
+            back_dc_h,
             &RECT {
                 left: 0,
                 top: reparto.props_fin,
                 right: ancho,
                 bottom: reparto.status_inicio,
             },
-            fondo_canvas,
+            paleta.canvas,
         );
-        _ = DeleteObject(fondo_canvas.into());
         // Separadores de 1 px: toolbar/props, props/canvas y canvas/status.
-        let borde = CreateSolidBrush(paleta.borde);
         let linea = escala.px(1).max(1);
         for y in [reparto.toolbar_fin - linea, reparto.props_fin - linea, reparto.status_inicio] {
-            FillRect(
-                back_dc.0,
+            lienzo::rellenar(
+                back_dc_h,
                 &RECT { left: 0, top: y, right: ancho, bottom: y + linea },
-                borde,
+                paleta.borde,
             );
         }
-        _ = DeleteObject(borde.into());
 
         // Property bar contextual (guarda las zonas para el hit-test).
         let banda_props = RECT {
@@ -691,7 +608,7 @@ fn pintar(hwnd: HWND, hdc: HDC, state: &mut EditorState) -> windows::core::Resul
             right: ancho,
             bottom: reparto.props_fin - linea,
         };
-        state.chips = props::pintar(back_dc.0, banda_props, state, escala);
+        state.chips = props::pintar(back_dc_h, banda_props, state, escala);
 
         // Canvas: comprometido, o comprometido + provisional durante el
         // arrastre (buffers persistentes: dos memcpy, cero asignaciones).
@@ -714,11 +631,11 @@ fn pintar(hwnd: HWND, hdc: HDC, state: &mut EditorState) -> windows::core::Resul
             } else {
                 &state.committed_dib
             };
-            let src_dc = MemDc::compatible_with(&screen)?;
+            let src_dc = back.dc_fuente()?;
             let _s = Selected::bitmap(&src_dc, dib)?;
-            SetStretchBltMode(back_dc.0, HALFTONE);
+            SetStretchBltMode(back_dc_h, HALFTONE);
             _ = StretchBlt(
-                back_dc.0,
+                back_dc_h,
                 encajado.x,
                 encajado.y + reparto.props_fin,
                 encajado.width as i32,
@@ -747,10 +664,10 @@ fn pintar(hwnd: HWND, hdc: HDC, state: &mut EditorState) -> windows::core::Resul
         if state.dirty {
             status.push_str(" · sin guardar");
         }
-        SetBkMode(back_dc.0, TRANSPARENT);
-        SetTextColor(back_dc.0, paleta.texto_secundario);
+        SetBkMode(back_dc_h, TRANSPARENT);
+        SetTextColor(back_dc_h, paleta.texto_secundario);
         let fuente = fuentes::fuente(fuentes::Rol::Secundario, escala);
-        let fuente_previa = SelectObject(back_dc.0, fuente.into());
+        let fuente_previa = SelectObject(back_dc_h, fuente.into());
         let mut wide: Vec<u16> = status.encode_utf16().collect();
         let mut rc = RECT {
             left: escala.px(12),
@@ -759,14 +676,14 @@ fn pintar(hwnd: HWND, hdc: HDC, state: &mut EditorState) -> windows::core::Resul
             bottom: alto,
         };
         DrawTextW(
-            back_dc.0,
+            back_dc_h,
             &mut wide,
             &mut rc,
             DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX,
         );
-        SelectObject(back_dc.0, fuente_previa);
+        SelectObject(back_dc_h, fuente_previa);
 
-        _ = BitBlt(hdc, 0, 0, ancho, alto, Some(back_dc.0), 0, 0, SRCCOPY);
+        back.volcar(hdc, ancho, alto);
     }
     Ok(())
 }

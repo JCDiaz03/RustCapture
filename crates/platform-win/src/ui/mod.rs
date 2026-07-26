@@ -3,14 +3,13 @@
 //! layout en unidades lógicas. Interno al crate: nada de `windows` sale
 //! de aquí hacia fuera.
 
-// PENDIENTE(F3.5): retirar cuando barra/editor/overlay consuman el módulo
-// (S3-S6); hasta entonces la infraestructura aún no tiene llamadores.
-#![allow(dead_code)]
-
 pub(crate) mod boton;
+pub(crate) mod botonera;
 pub(crate) mod fuentes;
 pub(crate) mod icono_app;
 pub(crate) mod iconos;
 pub(crate) mod layout;
+pub(crate) mod lienzo;
 pub(crate) mod theme;
 pub(crate) mod tooltip;
+pub(crate) mod ventana;

@@ -19,9 +19,7 @@ use windows::Win32::Graphics::Dwm::{
     DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute,
 };
 use windows::Win32::Graphics::Gdi::{
-    BeginPaint, BitBlt, CreateSolidBrush, DeleteObject, EndPaint, FillRect, FrameRect, HBRUSH,
-    InvalidateRect, PAINTSTRUCT, RDW_ALLCHILDREN, RDW_ERASE, RDW_INVALIDATE, RedrawWindow,
-    SRCCOPY,
+    BeginPaint, EndPaint, HBRUSH, InvalidateRect, PAINTSTRUCT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::DRAWITEMSTRUCT;
@@ -29,10 +27,10 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::w;
 
 use crate::dpi::Escala;
-use crate::gdi::raii::{Dib, MemDc, ScreenDc, Selected};
-use crate::ui::{boton, iconos, layout, theme, tooltip::Tooltips};
+use crate::ui::botonera::{self, BotonDef, Elemento};
+use crate::ui::{boton, iconos, layout, lienzo, theme, tooltip::Tooltips, ventana};
 
-use math::{Elemento, HotkeyTooltip};
+use math::HotkeyTooltip;
 
 /// Mensaje de callback del icono de bandeja (lo consume `tray`).
 pub(crate) const WM_TRAY: u32 = WM_APP + 1;
@@ -53,8 +51,6 @@ struct BarState {
     delay_ms: u64,
     /// Hotkeys de config: alimentan los tooltips "Nombre (hotkey)".
     hotkeys: HotkeysConfig,
-    /// Preferencia de tema de config; se re-resuelve en WM_SETTINGCHANGE.
-    theme_mode: ThemeMode,
     /// Control de tooltips; vive lo que la ventana (RefCell: hilo de UI).
     tooltips: RefCell<Option<Tooltips>>,
 }
@@ -109,7 +105,6 @@ impl Bar {
                 destination,
                 delay_ms,
                 hotkeys,
-                theme_mode,
                 tooltips: RefCell::new(None),
             }));
             // Tamaño provisional: WM_CREATE lo corrige con el DPI real.
@@ -168,9 +163,8 @@ pub fn run_message_loop(tx: &Sender<AppEvent>, region_hotkey: Option<HotkeyId>, 
 }
 
 fn state_ref<'a>(hwnd: HWND) -> Option<&'a BarState> {
-    // SAFETY: el puntero lo puso WM_NCCREATE desde un Box válido y solo
-    // se libera en WM_NCDESTROY (después de todo uso).
-    unsafe { ((GetWindowLongPtrW(hwnd, GWLP_USERDATA)) as *const BarState).as_ref() }
+    // El Box vive hasta WM_NCDESTROY (después de todo uso).
+    ventana::estado::<BarState>(hwnd).map(|s| &*s)
 }
 
 fn enviar_captura(hwnd: HWND, mode: ModeRequest) {
@@ -244,18 +238,16 @@ fn flujo_region(hwnd: HWND) {
     }
 }
 
-/// Layout actual de la fila al DPI de la ventana.
+/// Layout actual de la fila al DPI de la ventana (ancho natural).
 fn layout_actual(hwnd: HWND) -> (Vec<Elemento>, Vec<layout::Caja>, i32, i32) {
-    let escala = Escala::from_hwnd(hwnd);
     let fila = math::fila();
-    let items = math::a_items(&fila);
-    let alto = escala.px(math::ALTO_LOGICO);
-    let (cajas, ancho) = layout::distribuir(&items, escala, alto, None);
+    let (cajas, ancho) = botonera::cajas(hwnd, &fila, math::ALTO_LOGICO, false);
+    let alto = Escala::from_hwnd(hwnd).px(math::ALTO_LOGICO);
     (fila, cajas, ancho, alto)
 }
 
-fn texto_tooltip(def: &math::BotonDef, hotkeys: &HotkeysConfig) -> String {
-    match def.hotkey {
+fn texto_tooltip(def: &BotonDef, hotkeys: &HotkeysConfig) -> String {
+    match math::hotkey_tooltip(def.id) {
         Some(HotkeyTooltip::Fullscreen) => format!("{} ({})", def.nombre, hotkeys.fullscreen),
         Some(HotkeyTooltip::Window) => format!("{} ({})", def.nombre, hotkeys.window),
         Some(HotkeyTooltip::Region) => format!("{} ({})", def.nombre, hotkeys.region),
@@ -272,30 +264,9 @@ fn crear_botones(hwnd: HWND) {
     unsafe {
         _ = SetWindowPos(hwnd, None, 0, 0, ancho, alto, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
-    let mut tooltips = Tooltips::nuevo(hwnd).ok();
-    for (elemento, caja) in fila.iter().zip(&cajas) {
-        let Elemento::Boton(def) = elemento else {
-            continue;
-        };
-        let Ok(control) = boton::crear(
-            hwnd,
-            def.id,
-            *caja,
-            boton::Opciones {
-                icono: def.icono,
-                habilitado: def.habilitado,
-                grabacion: def.grabacion,
-            },
-        ) else {
-            continue;
-        };
-        if def.habilitado
-            && let (Some(tt), Some(state)) = (tooltips.as_mut(), state_ref(hwnd))
-        {
-            _ = tt.agregar(control, &texto_tooltip(def, &state.hotkeys));
-        }
-    }
     if let Some(state) = state_ref(hwnd) {
+        let tooltips =
+            botonera::crear(hwnd, &fila, &cajas, |def| texto_tooltip(def, &state.hotkeys));
         *state.tooltips.borrow_mut() = tooltips;
     }
 }
@@ -303,7 +274,7 @@ fn crear_botones(hwnd: HWND) {
 /// Recoloca los botones tras un cambio de DPI y ajusta el tamaño total.
 fn reposicionar(hwnd: HWND, sugerido: Option<(i32, i32)>) {
     let (fila, cajas, ancho, alto) = layout_actual(hwnd);
-    // SAFETY: mover ventanas propias (padre e hijos) desde su hilo.
+    // SAFETY: mover la propia ventana desde su hilo.
     unsafe {
         let (x, y) = sugerido.unwrap_or((0, 0));
         let flags = if sugerido.is_some() {
@@ -312,22 +283,7 @@ fn reposicionar(hwnd: HWND, sugerido: Option<(i32, i32)>) {
             SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
         };
         _ = SetWindowPos(hwnd, None, x, y, ancho, alto, flags);
-        for (elemento, caja) in fila.iter().zip(&cajas) {
-            let Elemento::Boton(def) = elemento else {
-                continue;
-            };
-            if let Ok(control) = GetDlgItem(Some(hwnd), i32::from(def.id)) {
-                _ = SetWindowPos(
-                    control,
-                    None,
-                    caja.x,
-                    caja.y,
-                    caja.ancho,
-                    caja.alto,
-                    SWP_NOZORDER | SWP_NOACTIVATE,
-                );
-            }
-        }
+        botonera::reposicionar(hwnd, &fila, &cajas);
         _ = InvalidateRect(Some(hwnd), None, false);
     }
 }
@@ -338,73 +294,49 @@ fn pintar(hwnd: HWND) {
     let paleta = theme::actual().paleta();
     let escala = Escala::from_hwnd(hwnd);
     let (fila, cajas, _, _) = layout_actual(hwnd);
-    // SAFETY: pintado estándar con recursos RAII; brochas propias se
-    // liberan en la misma función.
+    // SAFETY: BeginPaint/EndPaint estándar; el resto es RAII.
     unsafe {
         let mut ps = PAINTSTRUCT::default();
         let hdc = BeginPaint(hwnd, &mut ps);
         let mut rc = RECT::default();
         _ = GetClientRect(hwnd, &mut rc);
         let (ancho, alto) = (rc.right - rc.left, rc.bottom - rc.top);
-        if ancho <= 0 || alto <= 0 {
-            _ = EndPaint(hwnd, &ps);
-            return;
-        }
-        let Ok(pantalla) = ScreenDc::get() else {
-            _ = EndPaint(hwnd, &ps);
-            return;
-        };
-        let Ok(mem) = MemDc::compatible_with(&pantalla) else {
-            _ = EndPaint(hwnd, &ps);
-            return;
-        };
-        let Ok(back) = Dib::new_32bpp(&mem, ancho as u32, alto as u32) else {
-            _ = EndPaint(hwnd, &ps);
-            return;
-        };
-        let Ok(_sel) = Selected::bitmap(&mem, &back) else {
-            _ = EndPaint(hwnd, &ps);
-            return;
-        };
-
-        let fondo = CreateSolidBrush(paleta.superficie);
-        FillRect(mem.0, &rc, fondo);
-        _ = DeleteObject(fondo.into());
-
-        let talla = iconos::talla_para_dpi(escala.dpi());
-        let sep = CreateSolidBrush(paleta.borde);
-        for (elemento, caja) in fila.iter().zip(&cajas) {
-            match elemento {
-                Elemento::Asa => {
-                    let x = caja.x + (caja.ancho - talla as i32) / 2;
-                    let y = caja.y + (caja.alto - talla as i32) / 2;
-                    _ = iconos::pintar(
-                        mem.0,
-                        iconos::Icono::SysDragHandle,
-                        talla,
-                        x,
-                        y,
-                        paleta.texto_secundario,
-                        iconos::OPACO,
-                    );
+        if ancho > 0
+            && alto > 0
+            && let Ok(back) = lienzo::BackBuffer::nuevo(ancho, alto)
+        {
+            lienzo::rellenar(back.dc(), &rc, paleta.superficie);
+            let talla = iconos::talla_para_dpi(escala.dpi());
+            for (elemento, caja) in fila.iter().zip(&cajas) {
+                match elemento {
+                    Elemento::Asa => {
+                        let x = caja.x + (caja.ancho - talla as i32) / 2;
+                        let y = caja.y + (caja.alto - talla as i32) / 2;
+                        _ = iconos::pintar(
+                            back.dc(),
+                            iconos::Icono::SysDragHandle,
+                            talla,
+                            x,
+                            y,
+                            paleta.texto_secundario,
+                            iconos::OPACO,
+                        );
+                    }
+                    Elemento::Separador => {
+                        let linea = RECT {
+                            left: caja.x,
+                            top: caja.y,
+                            right: caja.x + caja.ancho,
+                            bottom: caja.y + caja.alto,
+                        };
+                        lienzo::rellenar(back.dc(), &linea, paleta.borde);
+                    }
+                    _ => {}
                 }
-                Elemento::Separador => {
-                    let linea = RECT {
-                        left: caja.x,
-                        top: caja.y,
-                        right: caja.x + caja.ancho,
-                        bottom: caja.y + caja.alto,
-                    };
-                    FillRect(mem.0, &linea, sep);
-                }
-                Elemento::Boton(_) => {}
             }
+            lienzo::marco(back.dc(), &rc, paleta.borde);
+            back.volcar(hdc, ancho, alto);
         }
-        let borde = RECT { left: 0, top: 0, right: ancho, bottom: alto };
-        FrameRect(mem.0, &borde, sep);
-        _ = DeleteObject(sep.into());
-
-        _ = BitBlt(hdc, 0, 0, ancho, alto, Some(mem.0), 0, 0, SRCCOPY);
         _ = EndPaint(hwnd, &ps);
     }
 }
@@ -415,8 +347,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
     unsafe {
         match msg {
             WM_NCCREATE => {
-                let cs = &*(lparam.0 as *const CREATESTRUCTW);
-                SetWindowLongPtrW(hwnd, GWLP_USERDATA, cs.lpCreateParams as isize);
+                ventana::adoptar_estado(hwnd, lparam);
                 DefWindowProcW(hwnd, msg, wparam, lparam)
             }
             WM_CREATE => {
@@ -448,17 +379,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                 LRESULT(0)
             }
             WM_SETTINGCHANGE => {
-                if theme::es_cambio_de_tema(lparam) {
-                    if let Some(state) = state_ref(hwnd) {
-                        theme::refrescar(state.theme_mode);
-                    }
-                    _ = RedrawWindow(
-                        Some(hwnd),
-                        None,
-                        None,
-                        RDW_ERASE | RDW_INVALIDATE | RDW_ALLCHILDREN,
-                    );
-                }
+                _ = ventana::cambio_de_tema(hwnd, lparam);
                 LRESULT(0)
             }
             m if m == WM_APP_REGION => {

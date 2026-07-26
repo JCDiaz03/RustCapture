@@ -6,9 +6,8 @@
 use rustcapture_core::annotate::Color;
 use windows::Win32::Foundation::{COLORREF, HWND, POINT, RECT, SIZE};
 use windows::Win32::Graphics::Gdi::{
-    ClientToScreen, CreateSolidBrush, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, DeleteObject,
-    DrawTextW, FillRect, FrameRect, GetTextExtentPoint32W, HDC, InvalidateRect, SelectObject,
-    SetBkMode, SetTextColor, TRANSPARENT,
+    ClientToScreen, DT_NOPREFIX, DT_SINGLELINE, DT_VCENTER, DrawTextW, GetTextExtentPoint32W,
+    HDC, InvalidateRect, SelectObject, SetBkMode, SetTextColor, TRANSPARENT,
 };
 use windows::Win32::UI::Controls::Dialogs::{CC_FULLOPEN, CC_RGBINIT, CHOOSECOLORW, ChooseColorW};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -18,7 +17,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::PCWSTR;
 
 use crate::dpi::Escala;
-use crate::ui::{fuentes, theme};
+use crate::ui::{fuentes, lienzo, theme};
 
 use super::estado::{EditorState, GROSORES, TAMANOS};
 use super::math::Herramienta;
@@ -120,14 +119,16 @@ pub(super) fn pintar(
                     right: x + medida.cx + hueco + swatch,
                     bottom: cy + swatch / 2,
                 };
-                let relleno = CreateSolidBrush(COLORREF(
-                    state.color.r as u32 | (state.color.g as u32) << 8 | (state.color.b as u32) << 16,
-                ));
-                FillRect(dc, &caja, relleno);
-                _ = DeleteObject(relleno.into());
-                let borde = CreateSolidBrush(paleta.borde);
-                FrameRect(dc, &caja, borde);
-                _ = DeleteObject(borde.into());
+                lienzo::rellenar(
+                    dc,
+                    &caja,
+                    COLORREF(
+                        state.color.r as u32
+                            | (state.color.g as u32) << 8
+                            | (state.color.b as u32) << 16,
+                    ),
+                );
+                lienzo::marco(dc, &caja, paleta.borde);
             }
             zonas.push((zona, chip.accion));
             x += ancho + escala.px(16);
